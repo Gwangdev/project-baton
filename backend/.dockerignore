@@ -1,0 +1,7 @@
+# 이미지 빌드에는 wrapper, 빌드 스크립트, main 소스만 들어간다.
+build/
+target/
+.gradle/
+src/test/
+src/e2e/
+*.log

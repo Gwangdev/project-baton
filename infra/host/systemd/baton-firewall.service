@@ -1,0 +1,12 @@
+[Unit]
+Description=Project Baton: per-visitor connection limits (work-orders D7, decision 6)
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /opt/baton/infra/host/firewall.nft
+
+[Install]
+WantedBy=multi-user.target

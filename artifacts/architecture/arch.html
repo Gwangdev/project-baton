@@ -1,0 +1,210 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Project Baton 아키텍처</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Pretendard', -apple-system, 'Apple SD Gothic Neo', sans-serif; word-break: keep-all; }
+  :root { --navy:#0b1b33; --navy-soft:#162e52; --orange:#ff6b2c; --paper:#f4f6f9; --line:#d6dde6; --grey:#8a9bb3; --grey-dark:#5b6b80; }
+
+  #arch { width: 1560px; padding: 40px; background: #fff; }
+  h2 { margin: 0 0 4px; font-size: 25px; color: var(--navy); }
+  .lead { margin: 0 0 8px; font-size: 14px; color: var(--grey-dark); }
+  .legend { display: flex; gap: 16px; margin: 0 0 22px; font-size: 12px; color: var(--grey-dark); align-items: center; }
+  .key { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 14px; height: 14px; border-radius: 4px; }
+
+  .canvas { position: relative; width: 1480px; height: 700px; }
+  .wires { position: absolute; inset: 0; }
+
+  .box { position: absolute; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 11px 14px; }
+  .box__t { margin: 0; font-size: 13px; font-weight: 700; color: var(--navy); }
+  .box__d { margin: 3px 0 0; font-size: 11px; color: var(--grey-dark); line-height: 1.5; }
+  .box__m { margin: 4px 0 0; font-family: ui-monospace, monospace; font-size: 11px; color: var(--grey); }
+
+  /* AI가 실제로 도는 자리만 오렌지로 표시한다. 나머지는 평범한 애플리케이션 코드다. */
+  .ai { border: 2px solid var(--orange); background: #fff8f4; }
+  .ai .box__t { color: var(--orange); }
+  .num {
+    display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%;
+    background: var(--orange); color: #fff; font-size: 11px; font-weight: 700; margin-right: 5px;
+  }
+
+  .core { background: var(--navy); border-color: var(--navy); }
+  .core .box__t { color: #fff; }
+  .core .box__d { color: #cfd8e3; }
+  .core .box__m { color: #8ea3bd; }
+
+  /* 장애 격리 경계 — 이 선 위쪽은 AI가 죽어도 계속 동작해야 한다 (NFR-08). */
+  .zone {
+    position: absolute; border: 1.5px dashed var(--orange); border-radius: 14px;
+    background: rgba(255,107,44,.04);
+  }
+  .zone__tag {
+    position: absolute; top: -11px; left: 18px; background: #fff; padding: 0 8px;
+    font-size: 11px; font-weight: 700; color: var(--orange);
+  }
+  .band { position: absolute; border: 1px dashed var(--grey); border-radius: 12px; background: var(--paper); }
+  .band__tag { position: absolute; top: -10px; left: 18px; background: #fff; padding: 0 8px; font-size: 11px; font-weight: 700; color: var(--grey-dark); }
+
+  .wlabel {
+    position: absolute; z-index: 3; margin: 0; padding: 3px 7px; border-radius: 6px;
+    background: rgba(255,255,255,.94); font-size: 11px; color: var(--navy); text-align: center; line-height: 1.4;
+  }
+  .wlabel b { font-family: ui-monospace, monospace; }
+  .wlabel--sub { color: var(--grey-dark); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 26px; }
+  th { text-align: left; padding: 8px 10px; background: var(--paper); color: var(--grey-dark); border-bottom: 1px solid var(--line); }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td code, th code { font-family: ui-monospace, monospace; font-size: 11px; }
+  .tag-ai { color: var(--orange); font-weight: 700; }
+  .note { margin-top: 14px; font-size: 12px; color: var(--grey-dark); line-height: 1.7; }
+  .note b { color: var(--navy); }
+</style>
+
+<section id="arch">
+  <h2>Project Baton 아키텍처 — AI는 세 자리에만 있다</h2>
+  <p class="lead">2단계 목표 구성. 1단계 프로토타입은 같은 경계를 유지한 채 AI 자리를 고정 데이터로 대체했다.</p>
+  <div class="legend">
+    <span class="key"><span class="swatch" style="background:#ff6b2c"></span>AI가 실제로 도는 자리</span>
+    <span class="key"><span class="swatch" style="background:#0b1b33"></span>사람이 판정하는 자리</span>
+    <span class="key"><span class="swatch" style="background:#fff;border:1px solid #d6dde6"></span>일반 애플리케이션·저장</span>
+  </div>
+
+  <div class="canvas">
+    <svg class="wires" viewBox="0 0 1480 700" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#0b1b33" /></marker>
+        <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#ff6b2c" /></marker>
+        <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#8a9bb3" /></marker>
+      </defs>
+
+      <path d="M250,120 H424" stroke="#0b1b33" stroke-width="2" fill="none" marker-end="url(#a)" />
+      <path d="M600,170 V236" stroke="#0b1b33" stroke-width="2" fill="none" marker-end="url(#a)" />
+      <path d="M762,278 H1074" stroke="#0b1b33" stroke-width="2" fill="none" marker-end="url(#a)" />
+
+      <!-- 동기 경로가 세 AI 작업을 각각 호출한다. 한 줄기에서 갈라져 나가는 형태로 그린다 -->
+      <path d="M560,322 V378 H1260" stroke="#0b1b33" stroke-width="2" fill="none" />
+      <path d="M560,378 V414" stroke="#ff6b2c" stroke-width="2" fill="none" marker-end="url(#ao)" />
+      <path d="M910,378 V414" stroke="#ff6b2c" stroke-width="2" fill="none" marker-end="url(#ao)" />
+      <path d="M1260,378 V414" stroke="#ff6b2c" stroke-width="2" fill="none" marker-end="url(#ao)" />
+
+      <path d="M1420,414 V326" stroke="#ff6b2c" stroke-width="2" fill="none" marker-end="url(#ao)" />
+      <path d="M560,544 V596" stroke="#ff6b2c" stroke-width="2" fill="none" marker-end="url(#ao)" />
+      <path d="M910,544 V596" stroke="#ff6b2c" stroke-width="2" fill="none" marker-end="url(#ao)" />
+      <path d="M1260,544 V596" stroke="#ff6b2c" stroke-width="2" fill="none" marker-end="url(#ao)" />
+
+      <path d="M165,604 V550" stroke="#8a9bb3" stroke-width="1.6" stroke-dasharray="6 5" fill="none" marker-end="url(#ag)" />
+      <path d="M292,462 H394" stroke="#8a9bb3" stroke-width="1.6" stroke-dasharray="6 5" fill="none" marker-end="url(#ag)" />
+    </svg>
+
+    <div class="box" style="left:40px; top:88px; width:210px;">
+      <p class="box__t">사용자 · 4 Actor</p>
+      <p class="box__d">기존 담당자 · 관리자 · 신규 담당자 · 시스템 관리자</p>
+    </div>
+
+    <div class="box" style="left:430px; top:88px; width:340px;">
+      <p class="box__t">Vue SPA — 화면 12개</p>
+      <p class="box__d">인증 가드 · Actor별 권한 화면 · 상태 표시</p>
+      <p class="box__m">S01 ~ S12</p>
+    </div>
+
+    <div class="zone" style="left:398px; top:236px; width:1044px; height:106px;">
+      <span class="zone__tag">AI가 죽어도 계속 동작해야 하는 경계 — NFR-08</span>
+    </div>
+    <div class="box core" style="left:428px; top:254px; width:334px; height:68px;">
+      <p class="box__t">동기 경로 — Spring Boot</p>
+      <p class="box__d">로그인·권한 · 기록 조회와 확인 · 인수인계 항목 · 관리 &nbsp; <b>REST 41 operations</b></p>
+    </div>
+    <div class="box" style="left:1074px; top:246px; width:368px; height:80px;">
+      <p class="box__t">PostgreSQL + pgvector</p>
+      <p class="box__d">19 테이블 · 확인된 기록의 임베딩. 미확인 초안은 색인하지 않는다</p>
+    </div>
+
+    <div class="box" style="left:40px; top:414px; width:252px; height:130px;">
+      <p class="box__t">수집 어댑터</p>
+      <p class="box__d">정기 수집 · 연동 상태와 마지막 결과 기록. 신규·변경 파일만 넘긴다</p>
+      <p class="box__m">source_connections</p>
+    </div>
+
+    <div class="box ai" style="left:394px; top:414px; width:332px; height:130px;">
+      <p class="box__t"><span class="num">1</span>기록 구조화</p>
+      <p class="box__d">비정형 원문에서 유형 6종·요약·담당자·기한을 뽑아 <b>AUTO_DRAFT</b>로 저장</p>
+      <p class="box__m">Structured Output · 비동기 (FR-05)</p>
+    </div>
+
+    <div class="box ai" style="left:744px; top:414px; width:332px; height:130px;">
+      <p class="box__t"><span class="num">2</span>인수인계 패키지 생성</p>
+      <p class="box__d">확인된 기록만 묶어 항목·요약 구성. 오래 걸리므로 접수와 완료를 나눈다</p>
+      <p class="box__m">202 Accepted + 상태 조회 (NFR-07)</p>
+    </div>
+
+    <div class="box ai" style="left:1094px; top:414px; width:348px; height:130px;">
+      <p class="box__t"><span class="num">3</span>근거 기반 질의응답</p>
+      <p class="box__d">확인된 기록만 검색해 인용과 함께 답한다. 근거가 없으면 <b>답을 만들지 않는다</b></p>
+      <p class="box__m">RAG · p95 3초 첫 응답 (FR-15·16)</p>
+    </div>
+
+    <div class="box" style="left:40px; top:604px; width:252px;">
+      <p class="box__t">외부 업무 시스템</p>
+      <p class="box__d">메일 · 결재 · 메신저 · 회의록 · 승인된 클라우드 업무 폴더</p>
+    </div>
+
+    <div class="box" style="left:394px; top:596px; width:1048px;">
+      <p class="box__t">LLM 제공자 — Spring AI</p>
+      <p class="box__d">세 작업이 같은 제공자를 호출한다. 여기가 끊겨도 위 경계 안쪽의 조회와 확인은 계속된다</p>
+    </div>
+
+    <p class="wlabel" style="left:254px; top:92px; width:170px;">로그인 후 권한 화면</p>
+    <p class="wlabel" style="left:608px; top:188px; width:216px;">REST · <b>problem+json</b> 오류</p>
+    <p class="wlabel" style="left:820px; top:252px; width:210px;">확인된 기록 읽기·쓰기</p>
+    <p class="wlabel" style="left:600px; top:334px; width:300px;">AI 작업 요청 — 셋 다 결과를 되돌려 받아 저장한다</p>
+    <p class="wlabel" style="left:1300px; top:352px; width:160px;">확인된 기록만 색인·검색</p>
+    <p class="wlabel wlabel--sub" style="left:176px; top:562px; width:130px;">원문 위치와 변경분</p>
+    <p class="wlabel wlabel--sub" style="left:290px; top:434px; width:110px;">수집 결과</p>
+    <p class="wlabel" style="left:640px; top:556px; width:200px;">Spring AI 호출</p>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th style="width:150px">AI 접점</th><th style="width:230px">무엇을 하는가</th><th style="width:180px">기법</th><th>1단계 프로토타입의 대체물</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="tag-ai">① 기록 구조화</td>
+        <td>비정형 원문 → 유형 6종 분류 · 요약 · 담당자 · 기한 추출</td>
+        <td><code>Structured Output</code><br />비동기</td>
+        <td><code>scenario.ts</code>의 고정 기록 6건. 폴더 수집은 <code>collectFromFolder()</code>가 파일에서 <code>AUTO_DRAFT</code>를 만든다</td>
+      </tr>
+      <tr>
+        <td class="tag-ai">② 패키지 생성</td>
+        <td>확인된 기록을 항목·요약으로 묶기</td>
+        <td><code>202 Accepted</code><br />상태 조회</td>
+        <td><code>advanceGeneration()</code>이 <code>REQUESTED → GENERATING → READY</code>를 단계로 재현</td>
+      </tr>
+      <tr>
+        <td class="tag-ai">③ 근거 질의응답</td>
+        <td>확인된 기록 검색 → 인용과 함께 답변. 근거 없으면 답하지 않음</td>
+        <td><code>RAG</code> · <code>pgvector</code><br /><code>Chat Memory</code></td>
+        <td><code>QA_SCRIPT</code> 키워드 매칭. <code>demoFailureMode</code>로 AI 실패도 재현</td>
+      </tr>
+      <tr>
+        <td>준비도 문항</td>
+        <td>인수인계 내용에서 점검 문항 출제</td>
+        <td>미정</td>
+        <td>고정 5문항. <b>출제 주체가 기획 문서에 없다 — 아래 참조</b></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="note">
+    <b>설계의 핵심은 AI를 넣은 자리가 아니라 뺀 자리다.</b>
+    로그인·권한·기록 조회와 확인·인수인계 항목·관리는 AI를 거치지 않는다.
+    그래서 LLM이나 벡터 검색이 죽어도 사용자는 기록을 계속 읽고 확인할 수 있다 (NFR-08).
+    AI가 만든 것은 <b>AUTO_DRAFT</b>로만 저장되고, 사람이 확인해야 인수인계의 근거가 된다.
+    임베딩 색인 대상도 확인된 기록으로 한정해 미확인 초안이 답변 근거로 새지 않게 한다.
+  </p>
+</section>

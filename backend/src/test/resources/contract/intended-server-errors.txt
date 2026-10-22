@@ -1,0 +1,4 @@
+# 통합 시험이 일부러 서버가 500으로 답하게 하는 operation. 그 밖의 500은 응답 계약 확인(ResponseContractCheck)에서
+# 실패한다. 형식: METHOD /path/{template} | reason
+POST /handovers/{handoverId}/approval | HandoverApprovalIT.auditFailureRollsBackCompletionAndMembershipTransition makes the audit insert fail to prove the approval rolls back
+GET /projects/{projectId}/handovers | ErrorContractIT.unexpectedFailureReturnsAGenericProblemWithoutInternalDetail renames a table to prove the 500 Problem leaks no internals

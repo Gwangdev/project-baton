@@ -1,0 +1,27 @@
+flowchart TD
+  %% 3b — 신규 담당자의 학습과 관리자의 완료 승인.
+  %% 3a 의 S08 에서 이어진다. 되돌아가는 경로는 맨 뒤에 두어야 주 흐름이 곧게 선다.
+  S08(["3a 에서 이어짐<br/>S08 패키지 생성 완료"]) -->|"생성 완료"| S09["S09 인수인계 패키지 · Q&A"]
+  S09 -->|"준비도 점검"| S10["S10 업무 준비도 확인"]
+  S10 -->|"5/5 · 검토 요청"| S11["S11 관리자 인수인계 검토"]
+  S11 -->|"완료 승인"| END(["인수인계 완료<br/>미해결 위험은 후속 작업으로"])
+
+  S09 -->|"근거 없음 · AI 실패"| B4["확인 대상 안내<br/>기록 조회는 계속 가능"]
+  B4 --> S09
+  S11 -->|"승인 불가"| B5["승인 차단 사유 표시<br/>준비도 미제출<br/>미확인 기록<br/>미해소 충돌"]
+  B5 --> S11
+
+  S09 -->|"근거 원문 열람"| S05["S05 기록 상세"]
+  S10 -->|"오답 근거 열람"| S05
+
+  S10 -->|"기준 미달 · 재응시"| S10
+  S11 -->|"보완 요청"| S09
+
+  classDef screen fill:#ffffff,stroke:#0b1b33,stroke-width:1.5px,color:#0b1b33
+  classDef err fill:#fff3ec,stroke:#ff6b2c,color:#5b6b80
+  classDef seam fill:#f4f6f9,stroke:#5b6b80,stroke-dasharray:4 3,color:#0b1b33
+  classDef term fill:#0b1b33,stroke:#0b1b33,color:#ffffff
+  class S05,S09,S10,S11 screen
+  class B4,B5 err
+  class S08 seam
+  class END term

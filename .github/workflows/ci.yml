@@ -1,0 +1,82 @@
+name: CI
+
+# 모든 push와 pull request가 백엔드 빌드(Testcontainers 위의 단위·통합 시험, 응답 계약 검사)와 프런트엔드 단위
+# 시험·빌드를 돌린다. 그다음 main으로의 push는 GitHub의 arm64 runner에서 arm64 호스트(t4g, work-orders D7)용 공개 데모
+# 이미지를 빌드해 커밋 tag로 ECR에 올린다. AWS 역할은 OIDC에서 와서 저장소나 그 비밀값에 AWS 키를 두지 않고, 저장소
+# 변수 AWS_ECR_PUSH_ROLE_ARN을 정하기 전까지 이미지 작업은 건너뛴다. 배포는 호스트에서 하는 단계로
+# 남는다(infra/host/deploy.sh).
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - name: Backend build (unit, integration, response contract)
+        working-directory: backend
+        run: ./gradlew --no-daemon build responseContract
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend unit tests and build
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm test -- --run
+          npm run build
+      - name: Egress allowance check
+        run: tests/host/egress-quota-check.sh
+
+  images:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_ECR_PUSH_ROLE_ARN != ''
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+          aws-region: ap-northeast-2
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      # tag는 변경 불가라서 반쯤 올라간 묶음(기준 덤프 없는 이미지)은 같은 커밋으로 다시 올릴 수 없고, 호스트는 없는
+      # 기준 덤프에서 실패하기 전에 스택을 바꾼다. 그래서 무엇을 올리기 전에 모두 빌드한다.
+      - name: Build the API and proxy images and the demo baseline
+        env:
+          PREFIX: ${{ steps.ecr.outputs.registry }}/project-baton
+          TAG: ${{ github.sha }}
+          BATON_DEMO_PASSWORD: ${{ secrets.BATON_DEMO_PASSWORD }}
+        run: |
+          docker build --build-context gradle-ro-cache=infra/build/no-gradle-cache -t "$PREFIX/app:$TAG" backend
+          docker build -f infra/proxy/Dockerfile --build-arg VITE_PUBLIC_DEMO=true -t "$PREFIX/proxy:$TAG" .
+          infra/demo/make-baseline.sh infra/demo/demo-baseline.dump
+          docker build -t "$PREFIX/demo-baseline:$TAG" infra/demo
+      - name: Push the three images
+        env:
+          PREFIX: ${{ steps.ecr.outputs.registry }}/project-baton
+          TAG: ${{ github.sha }}
+        run: for image in app proxy demo-baseline; do docker push "$PREFIX/$image:$TAG"; done

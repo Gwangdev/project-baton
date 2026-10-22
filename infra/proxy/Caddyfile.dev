@@ -1,0 +1,12 @@
+# compose.dev.yml용 로컬 평문 HTTP 프록시. API는 그 overlay에서만 Secure 쿠키 플래그를 끈다.
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+:8080 {
+	import /etc/caddy/routes.caddy
+}
+
+import /etc/caddy/health.caddy

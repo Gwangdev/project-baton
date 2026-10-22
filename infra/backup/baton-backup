@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Baton DB의 야간 암호화 백업(가정 A-06/A-07).
+#  baton-backup once      지금 백업 한 번, 그다음 보존 규칙
+#  baton-backup schedule  매일 BATON_BACKUP_AT(HH:MM, Asia/Seoul, 기본 02:00)에 백업 한 번
+#  baton-backup rotate    보존 규칙만
+# 덤프는 pg_dump에서 바로 age로 가서 평문으로 쓰이지 않는다. 공개키(수신자 파일)만 mount하고, 개인키는 이 호스트
+# 밖에서 운영자가 가진다. 연결은 libpq 변수(PGHOST, PGUSER, PGDATABASE, PGPASSWORD)에서 온다.
+set -euo pipefail
+# 소유자는 읽기·쓰기, 그룹은 읽기. 월간 복원 연습을 하는 운영자가 폴더의 그룹으로 백업을 읽고(Linux NAS에서는 소유자
+# 999, 운영자 그룹, setgid), 그 밖의 사람은 읽지 못한다.
+umask 027
+
+BACKUPS=/backups
+RECIPIENTS=/etc/baton/backup/recipients
+RULE=/usr/local/lib/baton/rotate.awk
+MARKER=.baton-backup-target
+LOCK=.baton-backup.lock
+NAME='^baton-[0-9]{8}-[0-9]{6}\.dump\.age$'
+
+log() { printf '%s %s\n' "$(TZ=Asia/Seoul date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >&2; }
+fail() { log "backup failed: $*"; exit 1; }
+
+check() {
+  # 원격 대상은 백업을 배포 네트워크 밖으로 보내서 외부 AI 공급자와 같은 명시적
+  # 승인(BATON_BACKUP_EXTERNAL_TRANSMISSION=approved)이 필요하다. 아직 만들지 않았으므로, 그 설정이 있으면 운영자가
+  # 백업이 호스트를 떠난다고 믿는 동안 무시하지 않고 여기서 멈춘다.
+  for variable in BATON_BACKUP_S3_ENDPOINT BATON_BACKUP_S3_BUCKET; do
+    [ -z "${!variable:-}" ] || fail "remote backup targets are not supported yet ($variable is set); use BATON_BACKUP_DIR"
+  done
+  [ -n "${PGPASSWORD:-}" ] || fail "the database password (BATON_DB_PASSWORD) is not set"
+  [ -d "$BACKUPS" ] && [ -w "$BACKUPS" ] || fail "$BACKUPS is not a writable directory (mount BATON_BACKUP_DIR there)"
+  # 표식은 백업 대상 자체(NAS에서는 공유 폴더)에 있다. 공유 폴더가 마운트되지 않으면 마운트 지점은 빈 로컬 폴더라서,
+  # 이 확인이 없으면 백업이 떠나야 할 장애 영역인 이 호스트에 조용히 쌓인다.
+  [ -f "$BACKUPS/$MARKER" ] || fail "$BACKUPS has no $MARKER file; is the backup target mounted? (create the file on the target once)"
+  # 여기 오타가 있으면 awk가 0으로 읽어서 방금 쓴 백업까지 모든 백업을 지운다.
+  [[ "${BATON_BACKUP_KEEP_DAILY:-30}" =~ ^[1-9][0-9]*$ ]] || fail "BATON_BACKUP_KEEP_DAILY must be a whole number of at least 1"
+  [[ "${BATON_BACKUP_KEEP_MONTHLY:-12}" =~ ^[0-9]+$ ]] || fail "BATON_BACKUP_KEEP_MONTHLY must be a whole number"
+  grep -q '^age1' "$RECIPIENTS" 2>/dev/null || fail "no age public key in $RECIPIENTS (mount BATON_BACKUP_RECIPIENTS there)"
+}
+
+rotate() {
+  ls -1 "$BACKUPS" | awk -v daily="${BATON_BACKUP_KEEP_DAILY:-30}" -v monthly="${BATON_BACKUP_KEEP_MONTHLY:-12}" -f "$RULE" |
+    while read -r name; do
+      rm -f -- "$BACKUPS/$name" "$BACKUPS/$name.sha256"
+      log "removed $name (retention)"
+    done
+}
+
+lock() {
+  # 한 번에 실행 하나. 두 번째 실행(밤 실행 도중의 수동 실행)이 있으면 첫 실행의 쓰다 만 파일을 지운다.
+  exec 9>"$BACKUPS/$LOCK"
+  flock -n 9 || fail "another backup run holds $LOCK"
+}
+
+once() {
+  check
+  lock
+  # 중간에 멈춘 실행은 .partial 파일을 남기고, 그 파일은 쓸 수 있는 백업이 아니다. 잠금이 있어서 지워도 안전하다.
+  find "$BACKUPS" -maxdepth 1 -name 'baton-*.dump.age.partial' -delete
+  local name partial sum
+  name="baton-$(TZ=Asia/Seoul date '+%Y%m%d-%H%M%S').dump.age"
+  partial="$BACKUPS/$name.partial"
+  log "backup started: $name"
+  if ! pg_dump --format=custom --compress=6 | age --encrypt --recipients-file "$RECIPIENTS" --output "$partial"; then
+    rm -f -- "$partial"
+    fail "pg_dump or age failed; no backup was written"
+  fi
+  sum=$(sha256sum "$partial" | cut -d' ' -f1)
+  mv -- "$partial" "$BACKUPS/$name"
+  printf '%s  %s\n' "$sum" "$name" > "$BACKUPS/$name.sha256"
+  log "backup written: $name ($(du -h "$BACKUPS/$name" | cut -f1), sha256 $sum)"
+  rotate
+}
+
+schedule() {
+  check
+  local at="${BATON_BACKUP_AT:-02:00}" now next
+  [[ "$at" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || fail "BATON_BACKUP_AT must be HH:MM, got $at"
+  # 프로세스 하나에 root로 돌릴 daemon이 없고 이미지가 어디서 돌든 일정이 같아서, cron 대신 단순한 대기를 쓴다.
+  while true; do
+    now=$(date +%s)
+    next=$(TZ=Asia/Seoul date -d "today $at" +%s)
+    [ "$next" -gt "$now" ] || next=$(TZ=Asia/Seoul date -d "tomorrow $at" +%s)
+    log "next backup at $(TZ=Asia/Seoul date -d "@$next" '+%Y-%m-%d %H:%M %Z')"
+    sleep $((next - now))
+    # 실패한 밤은 로그를 남기고 다음 밤을 시도한다. subshell이 있어서 실패 한 번이 일정을 끝내지 못한다.
+    ( once ) || log "this night's backup failed; the next attempt is tomorrow"
+  done
+}
+
+case "${1:-schedule}" in
+  once) once ;;
+  schedule) schedule ;;
+  rotate) check; lock; rotate ;;
+  *) echo "usage: baton-backup once|schedule|rotate" >&2; exit 64 ;;
+esac

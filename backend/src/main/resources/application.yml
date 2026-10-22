@@ -1,0 +1,183 @@
+spring:
+  application:
+    name: project-baton
+  autoconfigure:
+    exclude:
+      # 계정은 users 테이블이고 httpBasic과 formLogin이 꺼져 있어서 Spring Boot의 메모리 사용자는 쓰지 않는다. 켜 두면
+      # 모든 환경의 기동 로그에 생성된 비밀번호가 찍힌다.
+      - org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
+      # 이 자동 구성은 어떤 공급자를 고르든 Google 임베딩 연결을 만들고 그 연결은 키 없이는 만들어지지 않는데,
+      # Compose가 설정하지 않은 GOOGLE_API_KEY를 빈 문자열로 넘겨서 스택이 뜨지 못했다. Google이 임베딩 공급자일 때만
+      # config/GoogleEmbeddingConnectionConfiguration이 다시 넣는다.
+      - org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration
+  datasource:
+    url: ${BATON_DB_URL}
+    username: ${BATON_DB_USERNAME}
+    password: ${BATON_DB_PASSWORD}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  ai:
+    # Spring AI starter는 따로 말하지 않으면 스스로 켜지고 켜진 starter는 키가 필요해서, 공급자를 여기서 고르고
+    # 기본값을 none으로 둔다. 공급자가 없으면 모델을 만들지 않고 stub이 돈다. 채팅과 임베딩 모델은 따로
+    # 고르고(BATON_AI_CHAT_PROVIDER, BATON_AI_EMBEDDING_PROVIDER) 각각 BATON_AI_PROVIDER를 기본값으로 따르며, 값은
+    # openai, google-genai, ollama다. YAML 키 하나가 값과 map을 동시에 가질 수 없어서 Google 임베딩 모델은 자기
+    # 스위치(spring.ai.model.embedding.text, 아래)로 고른다. 모델은 BATON_AI_CHAT_MODEL_ID와
+    # BATON_AI_EMBEDDING_MODEL_ID로 고정하고, 이 값이 공급자에게 보내는 모델 이름이기도 하다.
+    model:
+      chat: ${BATON_AI_CHAT_PROVIDER:${BATON_AI_PROVIDER:none}}
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      chat:
+        options:
+          model: ${BATON_AI_CHAT_MODEL_ID:}
+      embedding:
+        options:
+          model: ${BATON_AI_EMBEDDING_MODEL_ID:}
+    google:
+      genai:
+        api-key: ${GOOGLE_API_KEY:}
+        chat:
+          options:
+            model: ${BATON_AI_CHAT_MODEL_ID:}
+        embedding:
+          # Google이 임베딩 공급자일 때만 읽는다(config/GoogleEmbeddingConnectionConfiguration). GOOGLE_API_KEY 없이
+          # Google을 고른 배포는 AiSettings가 멈춘다.
+          api-key: ${GOOGLE_API_KEY:}
+          text:
+            options:
+              model: ${BATON_AI_EMBEDDING_MODEL_ID:}
+    ollama:
+      # 컨테이너 안에서 호스트의 Ollama는 host.docker.internal이다. compose의 BATON_OLLAMA_BASE_URL이 그렇게 정한다.
+      base-url: ${BATON_OLLAMA_BASE_URL:http://localhost:11434}
+      chat:
+        # 두 프롬프트 모두 JSON 객체만 요구한다. qwen3:4b 같은 작은 로컬 모델은 thinking을 꺼도 답 안에서 소리 내어
+        # 추론해서(측정: JSON 대신 약 1,200토큰의 서술) 엄격한 parser가 거절했다. 공급자 자체의 JSON 모드를 켜면 그
+        # 서술이 사라지고 답이 몇 분이 아니라 몇 초 걸린다.
+        think: false
+        format: json
+        options:
+          model: ${BATON_AI_CHAT_MODEL_ID:}
+          temperature: 0
+      embedding:
+        options:
+          model: ${BATON_AI_EMBEDDING_MODEL_ID:}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  task:
+    scheduling:
+      # 작업 slot dispatcher, lease heartbeat, 수집 일정, Q&A 복구는 scheduler 스레드에서 돌고, 작업 자체는 slot마다의
+      # 스레드에서 돈다. Spring 기본값인 스레드 하나로는 느린 복구 sweep이 heartbeat를 30초 lease 너머로 미룬다.
+      pool:
+        size: 4
+  session:
+    store-type: jdbc
+    timeout: 30m
+    jdbc:
+      initialize-schema: never
+
+server:
+  # reverse proxy가 유일한 진입점이라서, 프록시의 X-Forwarded-For가 로그인 limiter에 클라이언트 주소를 준다.
+  forward-headers-strategy: native
+  servlet:
+    session:
+      cookie:
+        name: BATON_SESSION
+        http-only: true
+        same-site: lax
+        path: /
+
+baton:
+  database:
+    # 성능 보장이 아니라 README §6의 초기값이다(config/DatabasePools). 대기를 짧게 두면 DB가 내려가 있을 때 요청과
+    # readiness probe가 Hikari 기본값 30초 동안 매달리지 않고 몇 초 안에 실패한다.
+    api-pool-size: 20
+    worker-pool-size: 8
+    # scheduler 스레드(spring.task.scheduling.pool.size)마다 연결 하나라서 예약 작업은 연결을 기다리지 않는다.
+    control-pool-size: 4
+    connection-timeout: 5s
+    worker-statement-timeout: 30s
+  retention:
+    jobs:
+      # README §8: 운영 보존 정책이 확정되기 전에는 작업 메타데이터를 자동 삭제하지 않는다. 합성 데이터
+      # 스택(compose.dev.yml, 부하 시험 overlay)만 BATON_RETENTION_JOBS_ENABLED=true로 둔다.
+      enabled: ${BATON_RETENTION_JOBS_ENABLED:false}
+    audit:
+      # 로그인 감사 행에는 요청 주소가 남고, 이 주소는 끝을 정할 프로젝트가 없는 개인정보다(A-02, A-03). 스위치를 켜면
+      # 기간보다 오래된 로그인의 주소를 비우고 행은 남긴다. 운영 보존 정책이 확정되기 전에는 끈다(README §8). 합성
+      # 데이터 스택만 BATON_RETENTION_AUDIT_ENABLED=true로 둔다.
+      enabled: ${BATON_RETENTION_AUDIT_ENABLED:false}
+      sign-in-address-months: ${BATON_RETENTION_AUDIT_SIGN_IN_ADDRESS_MONTHS:24}
+  session:
+    # README §4.1: 운영에서는 Secure. 평문 HTTP 로컬 스택만 BATON_SESSION_COOKIE_SECURE=false로 둔다.
+    cookie-secure: ${BATON_SESSION_COOKIE_SECURE:true}
+  bootstrap:
+    # identity/AdminBootstrap: 빈 DB의 첫 SYSTEM_ADMIN. 다섯 개를 모두 주거나 하나도 주지 않는다. 값은 로그에 남기지
+    # 않는다.
+    admin:
+      employee-no: ${BATON_BOOTSTRAP_ADMIN_EMPLOYEE_NO:}
+      password: ${BATON_BOOTSTRAP_ADMIN_PASSWORD:}
+      name: ${BATON_BOOTSTRAP_ADMIN_NAME:}
+      email: ${BATON_BOOTSTRAP_ADMIN_EMAIL:}
+      organization: ${BATON_BOOTSTRAP_ADMIN_ORGANIZATION:}
+      # 비밀번호를 잃은 관리자를 운영자가 복구한다(AdminBootstrap). true로 두지 않으면 꺼져 있다.
+      reset: ${BATON_BOOTSTRAP_ADMIN_RESET:false}
+  auth:
+    # README §4.1: 일회용 설정 코드의 유효 기간(ISO-8601 duration). 비밀번호 규칙은 길이 하한만 두고 문자 종류 규칙은
+    # 두지 않는다(NIST SP 800-63B). 둘 다 회사 정책이 정해지기 전까지의 가정이다.
+    credential-token-ttl: ${BATON_CREDENTIAL_TOKEN_TTL:PT24H}
+    password-min-length: ${BATON_PASSWORD_MIN_LENGTH:12}
+  ai:
+    profile: ${BATON_AI_PROFILE:stub}
+    embedding-model-id: ${BATON_AI_EMBEDDING_MODEL_ID:}
+    chat-model-id: ${BATON_AI_CHAT_MODEL_ID:}
+    # 외부 공급자(openai, google-genai, 기본 URL이 배포 네트워크 밖인 Ollama)는 데이터를 밖으로 보낸다는 명시적 결정인
+    # "approved"가 있어야 기동한다.
+    external-transmission: ${BATON_AI_EXTERNAL_TRANSMISSION:}
+
+# 요청의 trace id(RequestTraceFilter)를 요청이 도는 동안 쓰는 모든 로그 줄에, tracing을 켰을 때 Boot가 trace id를 넣는
+# 자리와 같은 곳에 넣어서 로그 줄, 오류 응답, 감사 행을 서로 따라갈 수 있다.
+logging:
+  pattern:
+    correlation: "[%X{traceId:-}] "
+
+# README §8: probe와 metric은 프록시가 넘기지 않는 내부 관리 포트에만 둔다. readiness는 DB를 확인하고, LLM이 멈춰도
+# 서비스가 빠지지 않도록 모델은 일부러 readiness 조건에 넣지 않는다.
+management:
+  server:
+    port: ${BATON_MANAGEMENT_PORT:8081}
+  # 요청 시간에 histogram bucket이 없으면 개수, 합계, 최댓값만 남아서, 모니터가 README §8이 목표로 하는 p95를 계산할
+  # 수 있게 bucket을 붙인다. 예상 범위가 bucket 수를 제한하고, SLO bucket 두 개를 목표값(일반 500ms, 타임라인 1s)에
+  # 정확히 두어서 각 목표 안의 요청 비율을 보간하지 않고 센다.
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      minimum-expected-value:
+        http.server.requests: 5ms
+      maximum-expected-value:
+        http.server.requests: 10s
+      slo:
+        http.server.requests: 500ms,1s
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-components: always
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState, db
+
+# 임베딩 스위치는 평평한 키다. OpenAI와 Ollama는 spring.ai.model.embedding을, Google은
+# spring.ai.model.embedding.text를 읽고, 둘 다 고른 공급자 하나를 담는다.
+"spring.ai.model.embedding": ${BATON_AI_EMBEDDING_PROVIDER:${BATON_AI_PROVIDER:none}}
+"spring.ai.model.embedding.text": ${BATON_AI_EMBEDDING_PROVIDER:${BATON_AI_PROVIDER:none}}
+

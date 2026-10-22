@@ -1,0 +1,7 @@
+[Unit]
+Description=Project Baton: monthly egress allowance (work-orders D7, decision 4b)
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/baton/infra/host/egress-quota.sh

@@ -1,0 +1,31 @@
+{
+  "note": "Synthetic cases only. Each case pairs a source document with a recorded model output and the verdict the validator must reach. Real-model outputs are not recorded yet because no model profile was available (see docs/backend-design/evidence/model-profile.md).",
+  "members": [{"userId": 11, "name": "Kim Minji"}, {"userId": 12, "name": "Lee Junho"}],
+  "cases": [
+    {"name": "english decision and commitment", "body": "Steering meeting on 2026-09-01. The client agreed to move the pilot launch to 2026-10-22. Kim Minji will send the rollout plan by 2026-09-10.",
+     "output": {"records": [
+       {"recordType": "CHANGE_DECISION", "title": "Pilot launch moved", "summary": "The pilot launch moves to 2026-10-22.", "originalExcerpt": "The client agreed to move the pilot launch to 2026-10-22.", "occurredOn": "2026-09-01", "ownerUserId": null, "dueOn": "2026-10-22"},
+       {"recordType": "COMMITMENT", "title": "Rollout plan", "summary": "Kim Minji sends the rollout plan.", "originalExcerpt": "Kim Minji will send the rollout plan by 2026-09-10.", "occurredOn": "2026-09-01", "ownerUserId": 11, "dueOn": "2026-09-10"}]},
+     "expect": "valid", "records": 2},
+    {"name": "korean blocker with line breaks in excerpt", "body": "2026-09-03 주간 회의\n스테이징 서버 방화벽 오픈이\n아직 승인되지 않았다. 이준호 담당.",
+     "output": {"records": [{"recordType": "BLOCKER", "title": "방화벽 오픈 지연", "summary": "스테이징 서버 방화벽 오픈 승인이 지연되고 있다.", "originalExcerpt": "스테이징 서버 방화벽 오픈이 아직 승인되지 않았다.", "occurredOn": "2026-09-03", "ownerUserId": 12, "dueOn": null}]},
+     "expect": "valid", "records": 1},
+    {"name": "no records", "body": "Lunch menu for Friday.", "output": {"records": []}, "expect": "valid", "records": 0},
+    {"name": "code fence around json", "body": "The client agreed to move the pilot launch.", "raw": "```json\n{\"records\":[]}\n```", "expect": "invalid"},
+    {"name": "prose before json", "body": "The client agreed to move the pilot launch.", "raw": "Sure! {\"records\":[]}", "expect": "invalid"},
+    {"name": "invented excerpt", "body": "The client agreed to move the pilot launch.",
+     "output": {"records": [{"recordType": "CHANGE_DECISION", "title": "t", "summary": "s", "originalExcerpt": "The client cancelled the pilot.", "occurredOn": "2026-09-01", "ownerUserId": null, "dueOn": null}]},
+     "expect": "invalid"},
+    {"name": "owner outside project", "body": "The client agreed to move the pilot launch.",
+     "output": {"records": [{"recordType": "CHANGE_DECISION", "title": "t", "summary": "s", "originalExcerpt": "The client agreed to move the pilot launch.", "occurredOn": "2026-09-01", "ownerUserId": 99, "dueOn": null}]},
+     "expect": "invalid"},
+    {"name": "unknown record type", "body": "The client agreed to move the pilot launch.",
+     "output": {"records": [{"recordType": "DECISION", "title": "t", "summary": "s", "originalExcerpt": "The client agreed to move the pilot launch.", "occurredOn": "2026-09-01", "ownerUserId": null, "dueOn": null}]},
+     "expect": "invalid"},
+    {"name": "trust status smuggled in", "body": "The client agreed to move the pilot launch.",
+     "output": {"records": [{"recordType": "CHANGE_DECISION", "title": "t", "summary": "s", "originalExcerpt": "The client agreed to move the pilot launch.", "occurredOn": "2026-09-01", "ownerUserId": null, "dueOn": null, "trustStatus": "CONFIRMED"}]},
+     "expect": "invalid"},
+    {"name": "duplicate key", "body": "The client agreed to move the pilot launch.", "raw": "{\"records\":[],\"records\":[]}", "expect": "invalid"},
+    {"name": "trailing content", "body": "The client agreed to move the pilot launch.", "raw": "{\"records\":[]} {\"records\":[]}", "expect": "invalid"}
+  ]
+}

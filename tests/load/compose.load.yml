@@ -1,0 +1,53 @@
+# 부하 시험 overlay: docker compose -f compose.yml -f tests/load/compose.load.yml run --rm k6 run /scripts/baton.js
+# k6는 edge 네트워크에서 돌고 브라우저와 같은 진입점인 프록시에만 닿는다. 기본 스택에는 들어가지 않는다. 필수:
+# BATON_SEED_PASSWORD(합성 계정 비밀번호)와 BATON_LOAD_RESULTS(저장소 밖의 출력 폴더).
+services:
+  db:
+    # 문장별 비용(tests/load/statements.sh)은 부하 스택에서만 잰다. extension은 run.sh가 postgres DB에 만들고,
+    # Flyway가 소유한 업무 스키마는 바뀌지 않는다. 이 목록이 compose.yml의 command를 대신하므로 앞의 인자 넷은 그
+    # command를 되풀이한다.
+    command: ["postgres", "-c", "shared_buffers=512MB", "-c", "effective_cache_size=1536MB",
+              "-c", "shared_preload_libraries=pg_stat_statements", "-c", "track_io_timing=on"]
+
+  app:
+    environment:
+      # 합성 부하 데이터라서 작업 메타데이터와 로그인 주소 보존(README §8)을 부하 스택에서 켠다.
+      BATON_RETENTION_JOBS_ENABLED: "true"
+      BATON_RETENTION_AUDIT_ENABLED: "true"
+
+  k6:
+    image: grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
+    user: "12345:12345"
+    read_only: true
+    tmpfs:
+      - /tmp:uid=12345,gid=12345
+    environment:
+      BATON_BASE_URL: https://proxy:8443
+      BATON_SEED_PASSWORD: ${BATON_SEED_PASSWORD:?BATON_SEED_PASSWORD is required}
+      BATON_LOAD_SCALE: ${BATON_LOAD_SCALE:-1}
+      BATON_LOAD_PLAN: ${BATON_LOAD_PLAN:-full}
+      # 단계가 시작하는 epoch 초(run.sh). 0이면 setup이 끝날 때 시작한다.
+      BATON_LOAD_START_AT: ${BATON_LOAD_START_AT:-0}
+      # 로컬 프록시는 일회용 자체 서명 인증서를 내민다. BATON_BASE_URL이 그 프록시로 고정되어 있어서 검증을 건너뛰어도
+      # 다른 호스트에는 해당하지 않는다.
+      K6_INSECURE_SKIP_TLS_VERIFY: "true"
+      # run.sh가 Prometheus 출력을 더할 때만 쓴다(BATON_LOAD_PROMETHEUS=1, compose.observe.yml과
+      # compose.load-observe.yml과 함께). 계열별 백분위로는 operation 전체의 p95를 하나로 구할 수 없어서, native
+      # histogram으로 Grafana가 계산하게 한다.
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      K6_FEATURES: native-histograms
+    volumes:
+      - ./tests/load:/scripts:ro
+      - ${BATON_LOAD_RESULTS:?BATON_LOAD_RESULTS is required}:/results
+    depends_on:
+      proxy:
+        condition: service_healthy
+    networks:
+      - edge
+    cpus: 2
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

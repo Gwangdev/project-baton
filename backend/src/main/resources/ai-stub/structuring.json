@@ -1,0 +1,28 @@
+{
+  "bf88c632316ed1502ee4c0472dd92db02795f0815f2a32f1bc11dba99c9ce37b": {
+    "records": [
+      {
+        "recordType": "SCHEDULE",
+        "title": "Handover brief",
+        "summary": "Synthetic handover brief collected from the fixture source.",
+        "originalExcerpt": "Synthetic fixture: handover brief",
+        "occurredOn": "2026-01-10",
+        "ownerUserId": null,
+        "dueOn": null
+      }
+    ]
+  },
+  "ed43938c63dde8ea561d86198ed8dea57faca1f9d1eefe812cc56a520a8fae1d": {
+    "records": [
+      {
+        "recordType": "OPEN_ISSUE",
+        "title": "Open risk",
+        "summary": "Synthetic open risk collected from the fixture source.",
+        "originalExcerpt": "Synthetic fixture: open risk",
+        "occurredOn": "2026-01-11",
+        "ownerUserId": null,
+        "dueOn": null
+      }
+    ]
+  }
+}

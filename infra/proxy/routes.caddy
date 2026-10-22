@@ -1,0 +1,56 @@
+# HTTPS(Caddyfile)와 로컬 HTTP(Caddyfile.dev) 사이트가 함께 쓰는 route.
+header {
+	Strict-Transport-Security "max-age=31536000"
+	X-Content-Type-Options nosniff
+	X-Frame-Options DENY
+	Referrer-Policy same-origin
+	-Server
+}
+
+# API와 페이지가 한 출처를 써서 세션 쿠키와 CSRF token이 출처를 넘지 않고, CORS는 아예 설정하지 않는다. server-sent
+# event는 도착하는 대로 내보낸다.
+handle /api/* {
+	# contracts.md C01은 JSON 요청 본문을 1 MiB로 제한한다. API도 같은 한도를 강제하지만, 여기서 거절하면 너무 큰 본문이
+	# API에 닿지도 않는다.
+	request_body {
+		max_size 1MiB
+	}
+	reverse_proxy app:8080
+}
+
+# 빌드한 앱은 압축하면 약 3분의 1 크기라서 더 빠르고 호스트에서 나가는 데이터도 줄어드므로 글 응답을
+# 압축한다(work-orders D7이 그 데이터를 제한한다, 결정 4). 압축기는 바이트를 붙잡아 두는데 Q&A
+# stream(text/event-stream)은 쓰는 대로 독자에게 닿아야 해서, 형식을 하나씩 나열해 그 stream은 압축하지 않는다.
+encode {
+	zstd
+	gzip
+	match {
+		header Content-Type text/html*
+		header Content-Type text/css*
+		header Content-Type text/javascript*
+		header Content-Type text/plain*
+		header Content-Type application/javascript*
+		header Content-Type application/json*
+		header Content-Type application/problem+json*
+		header Content-Type image/svg+xml*
+	}
+}
+
+# 빌드한 asset. Vite가 모든 asset의 이름을 내용 해시로 지어서 캐시한 사본이 낡을 수 없고, 돌아온 방문자는 하나도 다시
+# 받지 않는다. 배포 전에 연 탭은 새 빌드에 없는 chunk를 요청할 수 있고, 그때 index.html로 대신하면 그 chunk 이름으로
+# 페이지를 1년 동안 캐시하게 되므로, 실제로 있는 파일에만 그렇게 표시한다. 없는 asset은 그냥 404다.
+handle /assets/* {
+	root * /srv
+	@exists file
+	header @exists Cache-Control "public, max-age=31536000, immutable"
+	file_server
+}
+
+# 나머지는 단일 페이지 앱이다. 모르는 경로는 클라이언트 router를 위해 index.html로 대신한다. index.html이 현재 asset
+# 이름을 담고 있어서 늘 다시 확인한다.
+handle {
+	root * /srv
+	header Cache-Control "no-cache"
+	try_files {path} /index.html
+	file_server
+}

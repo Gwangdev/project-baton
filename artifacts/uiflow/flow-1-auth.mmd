@@ -1,0 +1,29 @@
+flowchart LR
+  START(("진입 /")) --> GUARD
+  GUARD{"인증 확인<br/>router.beforeEach"}
+  GUARD -->|"미인증"| S01
+  GUARD -->|"인증됨"| S02
+
+  S01["S01 로그인<br/>사내 계정 · 비밀번호"]
+  S01 -->|"자격증명 일치"| S02
+  S01 -->|"없는 계정"| E1["등록되지 않은<br/>사내 계정"]
+  S01 -->|"비밀번호 불일치"| E2["비밀번호가<br/>일치하지 않음"]
+  S01 -->|"비활성 계정"| E3["관리자 문의 안내"]
+  E1 --> S01
+  E2 --> S01
+  E3 --> S01
+
+  S02["S02 프로젝트 대시보드<br/>모든 Actor의 공통 시작점"]
+  S02 -->|"로그아웃"| S01
+  S02 -.->|"신규 담당자 · 배정 전"| EMPTY["배정된<br/>인수인계 없음"]
+
+  classDef screen fill:#ffffff,stroke:#0b1b33,stroke-width:1.5px,color:#0b1b33
+  classDef gate fill:#fff8f4,stroke:#ff6b2c,stroke-width:2px,color:#ff6b2c
+  classDef err fill:#fff3ec,stroke:#ff6b2c,color:#5b6b80
+  classDef side fill:#f4f6f9,stroke:#d6dde6,color:#5b6b80
+  classDef term fill:#0b1b33,stroke:#0b1b33,color:#ffffff
+  class S01,S02 screen
+  class GUARD gate
+  class E1,E2,E3 err
+  class EMPTY side
+  class START term

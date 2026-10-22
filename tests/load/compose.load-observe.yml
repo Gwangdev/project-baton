@@ -1,0 +1,8 @@
+# Prometheus는 내부 네트워크 밖에 두면서 k6가 metric을 Prometheus로 보낼 수 있게, 부하 생성기를 관측 네트워크에
+# 붙인다. 두 overlay를 함께 쓸 때만 쓴다:
+#  COMPOSE_FILE=compose.yml:tests/load/compose.load.yml:compose.observe.yml:tests/load/compose.load-observe.yml
+services:
+  k6:
+    networks:
+      - edge
+      - observe

@@ -1,0 +1,18 @@
+baton:
+  ai:
+    profile: stub
+  embedding:
+    backfill-delay: 3600000
+  jobs:
+    dispatch-delay: 3600000
+    heartbeat-interval: 3600000
+  ingestion:
+    schedule-delay: 3600000
+    schedule-initial-delay: 3600000
+  qa:
+    recovery-delay: 3600000
+
+# 서버를 띄우는 시험은 관리 포트를 무작위로 잡아서 병렬 fork가 8081에서 부딪치지 않는다.
+management:
+  server:
+    port: 0

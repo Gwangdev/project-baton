@@ -1,0 +1,45 @@
+flowchart LR
+  ACTOR["사용자 · 4 Actor<br/>기존 담당자 · 관리자 · 신규 담당자 · 시스템 관리자"]
+  SPA["Vue SPA — 화면 12개<br/>인증 가드 · Actor별 권한 화면"]
+
+  subgraph CORE["AI가 죽어도 계속 동작해야 하는 경계 — NFR-08"]
+    direction LR
+    API["동기 경로 — Spring Boot<br/>로그인·권한 · 기록 조회와 확인 · 인수인계 항목 · 관리<br/>REST 41 operations"]
+    DB[("PostgreSQL + pgvector<br/>19 테이블 · 확인된 기록의 임베딩")]
+  end
+
+  AI1["① 기록 구조화<br/>Structured Output · 비동기"]
+  AI2["② 인수인계 패키지 생성<br/>202 Accepted + 상태 조회"]
+  AI3["③ 근거 기반 질의응답<br/>RAG · p95 3초 첫 응답"]
+  LLM["LLM 제공자 — Spring AI"]
+
+  EXT["외부 업무 시스템<br/>메일 · 결재 · 메신저 · 회의록 · 승인 클라우드 폴더"]
+  ADP["수집 어댑터<br/>정기 수집 · 연동 상태"]
+
+  ACTOR -->|로그인 후 권한 화면| SPA
+  SPA -->|REST · problem+json 오류| API
+  API <-->|확인된 기록 읽기·쓰기| DB
+
+  API -->|수집 원문의 구조화 요청| AI1
+  API -->|패키지 생성 요청| AI2
+  API -->|질문 전달| AI3
+
+  AI1 -->|AUTO_DRAFT 로 저장| DB
+  AI2 -->|패키지 항목 저장| DB
+  AI3 -->|확인된 기록만 검색·인용| DB
+
+  AI1 --> LLM
+  AI2 --> LLM
+  AI3 --> LLM
+
+  EXT -.->|원문 위치와 변경분| ADP
+  ADP -.->|수집 결과| AI1
+
+  classDef ai fill:#fff8f4,stroke:#ff6b2c,stroke-width:2px,color:#ff6b2c
+  classDef core fill:#0b1b33,stroke:#0b1b33,color:#ffffff
+  classDef store fill:#ffffff,stroke:#d6dde6,color:#0b1b33
+  classDef plain fill:#ffffff,stroke:#d6dde6,color:#0b1b33
+  class AI1,AI2,AI3 ai
+  class API core
+  class DB store
+  class ACTOR,SPA,LLM,EXT,ADP plain

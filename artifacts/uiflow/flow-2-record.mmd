@@ -1,0 +1,34 @@
+flowchart TD
+  S02["S02 프로젝트 대시보드"]
+  S02 --> S06["S06 내 기록 수집"]
+  S02 --> S04
+  S02 --> S03
+
+  S06 --> TAB1["프로젝트 폴더 탭<br/>연결 · 재연결 · 해제 · 지금 수집"]
+  S06 --> TAB2["빠른 메모 탭<br/>원본은 항상 비공개"]
+
+  EXT["외부 업무 시스템<br/>신규 · 변경 기록"] --> S04
+  TAB1 -->|"자동 후보화<br/>AUTO_DRAFT"| S04
+
+  S04["S04 확인 대기 기록함<br/>일괄 승인 · 일괄 제외"]
+  S04 -->|"원문 대조"| S05["S05 기록 상세 · AI 초안 확인<br/>좌 원문 · 우 AI 추출"]
+
+  S05 -->|"승인<br/>CONFIRMED"| S03
+  S05 -->|"수정 후 승인<br/>CORRECTED"| S03
+  S05 -->|"제외 · DISMISSED"| S04
+  S05 -->|"처리 불가"| ERR["이미 확정된 기록<br/>수정 사유 없음"]
+  ERR --> S05
+
+  TAB2 -->|"선택 요약 공유<br/>CONFIRMED 즉시 생성"| S03
+  TAB2 -.-> NOTE["원본 메모는<br/>공유해도 공개되지 않음"]
+
+  S03["S03 프로젝트 타임라인<br/>유형 6종 · 신뢰 상태 4종 · 기간 필터"]
+
+  classDef screen fill:#ffffff,stroke:#0b1b33,stroke-width:1.5px,color:#0b1b33
+  classDef err fill:#fff3ec,stroke:#ff6b2c,color:#5b6b80
+  classDef side fill:#f4f6f9,stroke:#d6dde6,color:#5b6b80
+  classDef ext fill:#f4f6f9,stroke:#5b6b80,color:#0b1b33
+  class S02,S03,S04,S05,S06,TAB1,TAB2 screen
+  class ERR err
+  class NOTE side
+  class EXT ext

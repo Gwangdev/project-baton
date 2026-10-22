@@ -1,0 +1,35 @@
+# Python 도구 환경
+.venv/
+__pycache__/
+*.pyc
+
+# Node · Vue
+node_modules/
+dist/
+*.local
+playwright-report/
+test-results/
+
+# 편집기·OS
+.DS_Store
+.idea/
+.vscode/
+
+# 생성물 — 원본은 DBML과 OpenAPI다
+artifacts/api-docs.html
+
+# 백엔드 빌드 출력
+backend/build/
+backend/.gradle/
+backend/target/
+
+# PPT 제작 중간물 — 제출본은 submission/에 있다
+# 후보본·검증본·버전 반복이 쌓여 저장소를 키우므로 추적하지 않는다. 파일은 디스크에 남는다
+.codex-ppt-build/
+output/
+
+# compose 프록시용 운영자 TLS 자료(compose.yml BATON_TLS_DIR 기본값)
+infra/proxy/tls/
+
+# 공개 데모의 기준 덤프 — CI가 만들어 이미지에 담는다. 데모 비밀번호의 해시가 들어 있어 추적하지 않는다
+infra/demo/*.dump

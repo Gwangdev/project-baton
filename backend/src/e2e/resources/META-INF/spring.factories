@@ -1,0 +1,4 @@
+# E2E 전용: 앱 PID를 spring.pid.file(SPRING_PID_FILE)에 써서, 브라우저 시험 정리가 lsof 없이도 Gradle의 JavaExec이
+# Gradle 프로세스 그룹 밖에서 띄운 JVM을 멈출 수 있게 한다.
+org.springframework.context.ApplicationListener=\
+org.springframework.boot.context.ApplicationPidFileWriter

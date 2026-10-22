@@ -1,0 +1,10 @@
+[Unit]
+Description=Project Baton: put the public demo back to its baseline (work-orders D7, decision 12)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=BATON_DEPLOY_ENV=/etc/baton/deploy.env
+Environment=BATON_DEMO_BASELINE=/var/lib/baton/demo-baseline.dump
+ExecStart=/opt/baton/infra/demo/reset.sh

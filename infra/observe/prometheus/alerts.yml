@@ -1,0 +1,80 @@
+# 관측 overlay의 경보 규칙. Prometheus와 Grafana에서만 울리고 어디로도 보내지 않는다.
+# 경보는 사용자가 느끼는 증상(지연, 오류, 닿지 않는 서비스)을 따르고, CPU 같은 원인은 경보가 울린 뒤 보는 자원
+# 대시보드에 둔다. 지연 목표는 README §8의 일반 API p95 500ms, 타임라인 p95 1s로, 요청의 95% 이상이 목표 안이라는
+# 뜻이다. Q&A stream은 답변 시간이 모델의 몫이라 뺀다(AI 목표는 따로 잰다).
+groups:
+  - name: baton-latency
+    rules:
+      - record: baton:general_within_target:ratio_rate5m
+        expr: |
+          sum(rate(http_server_requests_seconds_bucket{uri=~"/api/.*", uri!="/api/v1/projects/{projectId}/records", uri!~".*/questions.*", le="0.5"}[5m]))
+          / sum(rate(http_server_requests_seconds_count{uri=~"/api/.*", uri!="/api/v1/projects/{projectId}/records", uri!~".*/questions.*"}[5m]))
+      - record: baton:general_within_target:ratio_rate30m
+        expr: |
+          sum(rate(http_server_requests_seconds_bucket{uri=~"/api/.*", uri!="/api/v1/projects/{projectId}/records", uri!~".*/questions.*", le="0.5"}[30m]))
+          / sum(rate(http_server_requests_seconds_count{uri=~"/api/.*", uri!="/api/v1/projects/{projectId}/records", uri!~".*/questions.*"}[30m]))
+      - record: baton:timeline_within_target:ratio_rate5m
+        expr: |
+          sum(rate(http_server_requests_seconds_bucket{uri="/api/v1/projects/{projectId}/records", le="1.0"}[5m]))
+          / sum(rate(http_server_requests_seconds_count{uri="/api/v1/projects/{projectId}/records"}[5m]))
+      # 두 window가 모두 예산을 넘어야 한다. 느린 1분이 아니라 계속되는 위반이고, 짧은 window가 있어서 원인이 사라지면
+      # 곧 풀린다.
+      - alert: BatonGeneralLatencyOverTarget
+        expr: baton:general_within_target:ratio_rate5m < 0.95 and baton:general_within_target:ratio_rate30m < 0.95
+        labels:
+          severity: page
+        annotations:
+          summary: "General API p95 over 500 ms: {{ $value | humanizePercentage }} of requests within target in 5 minutes"
+      - alert: BatonTimelineLatencyOverTarget
+        expr: baton:timeline_within_target:ratio_rate5m < 0.95
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Timeline p95 over 1 s: {{ $value | humanizePercentage }} of requests within target"
+  - name: baton-errors
+    rules:
+      - alert: BatonServerErrors
+        expr: |
+          sum(rate(http_server_requests_seconds_count{uri=~"/api/.*", status=~"5.."}[5m]))
+          / sum(rate(http_server_requests_seconds_count{uri=~"/api/.*"}[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "More than 1% of API requests answered 5xx for 5 minutes"
+  - name: baton-saturation
+    rules:
+      # 지난 1분 내내 요청이 DB 연결을 기다렸다. 부하 실행에서는 DB CPU가 한도에서 멀 때도 모든 지연 정점 앞에 이것이
+      # 있었다.
+      - alert: BatonApiPoolWaiting
+        expr: min_over_time(hikaricp_connections_pending{pool="baton-api"}[1m]) > 0
+        labels:
+          severity: warn
+        annotations:
+          summary: "API requests have waited for a database connection for a minute"
+      # 생성 pool(구조화와 패키지 생성, slot 여섯)만. 임베딩과 수집 pool은 slot이 하나씩이라 적체가 빠질 때마다 오래
+      # 바쁘고(첫 부하 실행에서 모든 목표가 지켜지는 동안 임베딩이 45분 동안 큐에 있었다), 거기에 포화 경보를 걸면
+      # 정상 작업에서 울린다.
+      - alert: BatonGenerationSlotsSaturated
+        expr: max_over_time(baton_job_slots_available{pool="generation"}[10m]) == 0
+        labels:
+          severity: warn
+        annotations:
+          summary: "All six generation slots (structuring, package builds) have been busy for 10 minutes; jobs are queueing"
+  - name: baton-availability
+    rules:
+      - alert: BatonAppUnreachable
+        expr: up{job="app"} == 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: "The application's management port has not answered for a minute"
+      - alert: BatonDatabaseDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: "postgres_exporter cannot reach the database"

@@ -1,0 +1,4059 @@
+openapi: 3.0.3
+
+info:
+  title: Project Baton API
+  description: |
+    사내 프로젝트 인수인계 서비스의 화면 기반 REST 계약이다.
+
+    범위는 `DAY1_서비스_기획_확정안.md`의 FR-01~FR-22와 화면 S01~S12이며,
+    엔티티와 필드는 `ProjectBaton-DB.dbml`, `화면별_표시필드표.md`와 일치한다.
+
+    설계 원칙
+    - AI 결과는 자동 확정하지 않는다. 신뢰 상태는 AUTO_DRAFT · CONFIRMED · CORRECTED · DISMISSED 네 가지다.
+    - 느린 작업(패키지 생성)은 202 Accepted로 접수하고 상태 조회로 확인한다.
+    - AI 또는 수집이 실패해도 기록 조회 경로는 계속 동작한다.
+    - 영구 삭제 대신 비활성화와 연동 해제를 기본 동작으로 사용한다.
+
+    인증은 사내 계정 로그인(`POST /auth/sign-in`)이 만드는 세션 쿠키(`cookieAuth`)이고, 상태를 바꾸는 요청은
+    `GET /auth/csrf`로 받은 CSRF 토큰을 헤더에 함께 보낸다.
+  version: 1.0.0
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://baton.internal.example/api/v1
+    description: 사내 단일 테넌트 배포
+
+security:
+  - cookieAuth: []
+
+x-fr-requirements:
+  FR-01: [signIn, signOut, getCsrfToken, getCurrentUser, listProjects, setCredential]
+  FR-02: [listRecords, getRecord, getProject]
+  FR-03: [listRecords, getRecord, createRecordRelation]
+  FR-04: [listCollectedFiles, createManualDraft, retrySourceProcessing]
+  FR-05: [listCollectedFiles, createManualDraft, retrySourceProcessing]
+  FR-06: [reviewRecord, listRecords]
+  FR-07: [listPersonalNotes, createPersonalNote, sharePersonalNoteSummary]
+  FR-08: [listPersonalNotes, createPersonalNote, sharePersonalNoteSummary]
+  FR-09: [reviewRecord, listRecords]
+  FR-10: [requestHandover, listHandovers, getHandover, regenerateHandover]
+  FR-11: [requestHandover, listHandovers, getHandover, regenerateHandover]
+  FR-12: [resolveHandoverItem, createRecordRelation]
+  FR-13: [decideHandoverCompletion, acknowledgeHandoverItem]
+  FR-14: [listHandoverItems, getHandover, retryHandoverGeneration]
+  FR-15: [askQuestion, listQuestions]
+  FR-16: [askQuestion, listQuestions]
+  FR-17: [getAssessment, submitAssessmentAttempt]
+  FR-18: [listOrganizations, createOrganization, updateOrganization, deleteOrganization, listUsers, createUser, issueCredentialToken, updateUser, deleteUser, listAllProjects, createProject, updateProject, deleteProject, listProjectMembers, addProjectMember, updateProjectMember, deleteProjectMember]
+  FR-19: [listSourceConnections, createSourceConnection, getSourceConnection, updateSourceConnection, deleteSourceConnection, reconnectSourceConnection, listCollectedFiles, retrySourceProcessing]
+  FR-20: [getDashboard, listProjects, listRecords]
+  FR-21: [createSourceConnection, updateSourceConnection, reconnectSourceConnection, listCollectedFiles, createManualDraft]
+  FR-22: [listSourceConnections, getSourceConnection, getDashboard]
+
+tags:
+  - name: auth
+    description: S01 사내 계정 로그인과 로그아웃
+  - name: dashboard
+    description: S02 프로젝트 대시보드의 요약 정보
+  - name: projects
+    description: S02·S03 프로젝트 목록과 상세
+  - name: records
+    description: S03·S04·S05 프로젝트 기록의 조회와 확인
+  - name: notes
+    description: S06 빠른 메모의 비공개 저장과 선택 요약 공유
+  - name: connections
+    description: S06·S12 기록 수집 연동의 연결과 상태
+  - name: handovers
+    description: S07·S08·S11 담당자 교체와 인수인계 패키지
+  - name: qa
+    description: S09 근거 기반 질의응답
+  - name: assessments
+    description: S10 업무 준비도 확인
+  - name: admin
+    description: S12 사용자·조직·프로젝트·역할 관리
+
+paths:
+
+  /auth/sign-in:
+    post:
+      tags: [auth]
+      operationId: signIn
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+      summary: 사내 계정 로그인
+      description: |
+        FR-01. 사내 계정과 비밀번호로 인증하고 접근 가능한 프로젝트를 함께 반환한다.
+        비밀번호는 저장하지 않고 해시로만 대조한다.
+        비활성화된 계정은 자격증명이 맞아도 403으로 거절한다.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignInRequest'
+      responses:
+        '200':
+          description: 인증된 사용자와 참여 프로젝트
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/sign-out:
+    post:
+      tags: [auth]
+      operationId: signOut
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+      summary: 로그아웃
+      description: 현재 세션을 종료한다. 이미 만료된 세션이어도 성공으로 처리한다.
+      responses:
+        '204':
+          description: 종료됨
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/credentials:
+    post:
+      tags: [auth]
+      operationId: setCredential
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+      summary: 설정 코드로 비밀번호 정하기
+      description: |
+        관리자가 발급한 일회용 설정 코드로 본인의 비밀번호를 정한다(README §4.1). 처음 정하는 경우와 분실 뒤 재설정이
+        같은 경로다. 성공하면 204이고 자동 로그인하지 않는다. 그 사용자의 기존 세션은 모두 종료된다.
+        없는 사번, 틀린 코드, 만료된 코드, 이미 쓴 코드, 다른 사용자의 코드는 모두 같은 400 INVALID_CREDENTIAL_TOKEN이라
+        계정이 있는지 알 수 없다. 비밀번호가 규칙(12~128자, 사번과 다름)을 어기면 400 INVALID_INPUT이고 코드는 쓰이지
+        않는다. 로그인과 같은 실패 제한(5회/5분)이 적용되어 넘으면 429다. Idempotency-Key는 받지 않는다. 코드를 한 번
+        쓰면 끝나는 것이 멱등 장치다.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetCredentialRequest'
+      responses:
+        '204':
+          description: 비밀번호가 정해졌다.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/csrf:
+    get:
+      tags: [auth]
+      operationId: getCsrfToken
+      summary: 상태 변경용 CSRF 토큰 조회
+      security: []
+      responses:
+        '200':
+          description: Cache-Control no-store로 반환하는 CSRF 토큰
+          headers:
+            Cache-Control:
+              schema: {type: string, example: no-store}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsrfToken'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /me:
+    get:
+      tags: [dashboard]
+      operationId: getCurrentUser
+      summary: 현재 사용자와 참여 프로젝트 역할 조회
+      description: 전 화면 상단에 표시하는 Actor 이름·직급과 프로젝트별 역할을 반환한다.
+      responses:
+        '200':
+          description: 현재 사용자
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /dashboard:
+    get:
+      tags: [dashboard]
+      operationId: getDashboard
+      summary: 대시보드 요약 조회
+      description: |
+        S02의 요약 카드와 프로젝트 목록을 반환한다.
+        연동 상태는 FR-22에 따라 일반 사용자에게는 참여 프로젝트만, 시스템 관리자에게는 전체가 보인다.
+      responses:
+        '200':
+          description: 대시보드 요약
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects:
+    get:
+      tags: [projects]
+      operationId: listProjects
+      summary: 접근 가능한 프로젝트 목록 조회
+      description: FR-01에 따라 자신에게 권한이 부여된 프로젝트만 반환한다.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: 프로젝트 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{projectId}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [projects]
+      operationId: getProject
+      summary: 프로젝트 상세 조회
+      description: S03 상단의 프로젝트 요약과 구성원 역할을 반환한다.
+      responses:
+        '200':
+          description: 프로젝트 상세
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{projectId}/members:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [projects]
+      operationId: listCurrentProjectMembers
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      summary: 프로젝트 현재 구성원 조회
+      description: 그 프로젝트의 현재 구성원(배정이 시작됐고 끝나지 않았으며 사용자와 조직이 활성)만 돌려준다. 읽는 사람도 그 프로젝트의 현재 구성원이어야 하고, 아니면 다른 프로젝트 조회와 같이 404다. 담당자 교체 요청에서 기존·신규 담당자를 고를 때 쓴다(FR-10). 시스템 관리자용 목록(listProjectMembers)과 달리 종료된 배정을 담지 않는다.
+      responses:
+        '200':
+          description: 현재 구성원 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMemberList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{projectId}/records:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [records]
+      operationId: listRecords
+      summary: 프로젝트 기록 목록 조회
+      description: |
+        S03 타임라인과 S04 확인 대기 기록함이 함께 사용한다.
+        개인 연결에서 수집된 AUTO_DRAFT 기록은 연결한 사용자에게만 반환한다.
+      parameters:
+        - name: recordType
+          in: query
+          required: false
+          description: 기록 유형 필터. 여러 값을 반복해서 전달할 수 있다.
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/RecordType'
+          style: form
+          explode: true
+        - name: trustStatus
+          in: query
+          required: false
+          description: 신뢰 상태 필터. 여러 값을 반복해서 전달할 수 있다.
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/RecordTrustStatus'
+          style: form
+          explode: true
+        - name: occurredFrom
+          in: query
+          required: false
+          description: 발생일 시작 (포함)
+          schema:
+            type: string
+            format: date
+        - name: occurredTo
+          in: query
+          required: false
+          description: 발생일 종료 (포함)
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 기록 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /records/{recordId}:
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+    get:
+      tags: [records]
+      operationId: getRecord
+      summary: 기록 상세 조회
+      description: S05 좌측 원문과 우측 AI 추출 결과, 수정 이력과 대체·충돌 관계를 함께 반환한다.
+      responses:
+        '200':
+          description: 기록 상세
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /records/{recordId}/review:
+    parameters:
+      - $ref: '#/components/parameters/RecordId'
+    post:
+      tags: [records]
+      operationId: reviewRecord
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 기록 승인·수정 후 승인·제외
+      description: |
+        FR-06의 확인 행동이다.
+        `CONFIRM`은 상태를 CONFIRMED로, `CORRECT`는 CORRECTED로 바꾸고 수정 이력 한 건을 남긴다.
+        `DISMISS`는 DISMISSED로 바꾼다. 이미 확정된 기록을 다시 확인하면 409를 반환한다.
+        `CORRECT`의 ownerUserId가 이 프로젝트의 현재 구성원이 아니면 400이고 errors에 필드 이름이 담긴다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRecordRequest'
+      responses:
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '200':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 확인 후 기록 상세
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /projects/{projectId}/notes:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [notes]
+      operationId: listPersonalNotes
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      summary: 내 빠른 메모 목록 조회
+      description: 작성자 본인의 메모만 반환한다. 공유 이력은 파생 기록의 코드 목록으로 표시한다.
+      responses:
+        '200':
+          description: 메모 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalNoteList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [notes]
+      operationId: createPersonalNote
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 빠른 메모 비공개 저장
+      description: FR-07·FR-08. 저장된 원본은 어떤 경우에도 프로젝트에 노출되지 않는다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePersonalNoteRequest'
+      responses:
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '201':
+          description: 저장된 메모
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalNote'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /notes/{noteId}/share:
+    parameters:
+      - $ref: '#/components/parameters/NoteId'
+    post:
+      tags: [notes]
+      operationId: sharePersonalNoteSummary
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 메모의 선택 요약을 프로젝트 기록으로 공유
+      description: |
+        원본 저장과 분리된 경로다. 사용자가 직접 고른 요약과 기록 유형만 전달한다.
+        응답은 새로 생성된 CONFIRMED 기록이며 AUTO_DRAFT 검토 단계를 거치지 않는다.
+        원본 메모의 공개 범위는 바뀌지 않는다.
+        ownerUserId가 이 프로젝트의 현재 구성원이 아니면 400이고 errors에 필드 이름이 담긴다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareNoteSummaryRequest'
+      responses:
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '201':
+          description: 공유로 생성된 CONFIRMED 기록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /projects/{projectId}/connections:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [connections]
+      operationId: listSourceConnections
+      summary: 프로젝트 연동 목록과 상태 조회
+      description: |
+        FR-19·FR-21·FR-22.
+        S06은 자신이 연결한 클라우드 업무 폴더를, S12는 프로젝트 공용 연동까지 함께 조회한다.
+      parameters:
+        - name: channel
+          in: query
+          required: false
+          description: 채널 필터
+          schema:
+            $ref: '#/components/schemas/SourceChannel'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: 연동 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceConnectionList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [connections]
+      operationId: createSourceConnection
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 승인된 클라우드 업무 폴더 연결
+      description: |
+        FR-21. 회사가 승인한 저장소의 폴더만 연결한다.
+        개인 PC 폴더 감시나 데스크톱 에이전트는 사용하지 않는다.
+        원본 저장소의 권한은 변경하지 않는다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSourceConnectionRequest'
+      responses:
+        '201':
+          description: 생성된 연동
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceConnection'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /connections/{connectionId}:
+    parameters:
+      - $ref: '#/components/parameters/ConnectionId'
+    get:
+      tags: [connections]
+      operationId: getSourceConnection
+      summary: 연동 상세와 마지막 수집 결과 조회
+      description: 연결 상태, 수집 상태, 마지막 수집 시각과 최근 수집 결과를 반환한다.
+      responses:
+        '200':
+          description: 연동 상세
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceConnectionDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      tags: [connections]
+      operationId: updateSourceConnection
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 연동 표시명·대상 변경과 일시 중지·재개·해제
+      description: |
+        D11. 시스템 관리자는 모든 연동을, 일반 사용자는 자신이 연결한 폴더만 변경할 수 있다.
+        `status`를 DISCONNECTED로 바꾸는 것이 해제이며 수집된 기록은 삭제되지 않는다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSourceConnectionRequest'
+      responses:
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '200':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 변경된 연동
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceConnection'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [connections]
+      operationId: deleteSourceConnection
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 연동 설정 삭제
+      description: |
+        오생성 취소용이다. 이 연동에서 수집된 문서가 하나도 없을 때만 지운다.
+        수집된 문서가 있으면 409로 거부한다. 그 문서들이 기록의 원문 근거이기 때문이다.
+        이미 수집한 연동을 그만 쓰려면 PATCH status=DISCONNECTED 로 해제한다.
+        해제는 수집된 기록을 지우지 않는다.
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '204':
+          description: 삭제되었다. 본문 없음.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/ReferenceConflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /connections/{connectionId}/reconnect:
+    parameters:
+      - $ref: '#/components/parameters/ConnectionId'
+    post:
+      tags: [connections]
+      operationId: reconnectSourceConnection
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 연동 재연결
+      description: 인증 만료나 실패 상태의 연동을 다시 연결하고 상태를 ACTIVE로 되돌린다.
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '200':
+          description: 재연결된 연동
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceConnection'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /connections/{connectionId}/files:
+    parameters:
+      - $ref: '#/components/parameters/ConnectionId'
+    get:
+      tags: [connections]
+      operationId: listCollectedFiles
+      summary: 수집된 파일·문서 목록 조회
+      description: |
+        FR-21. S06 프로젝트 폴더 탭의 파일 목록이다.
+        각 항목에는 그 파일에서 생성된 기록 후보의 코드가 함께 담긴다.
+        개인 연결의 목록은 연결한 사용자만 조회할 수 있다.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: 수집 문서 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectedFileList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+
+  /projects/{projectId}/handovers:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [handovers]
+      operationId: listHandovers
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      summary: 프로젝트의 인수인계 목록 조회
+      description: 신규 담당자에게 배정된 인수인계가 없으면 빈 목록을 반환한다.
+      responses:
+        '200':
+          description: 인수인계 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HandoverList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [handovers]
+      operationId: requestHandover
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 담당자 교체 요청과 패키지 생성 접수
+      description: |
+        FR-10·FR-11. 프로젝트 관리자만 호출할 수 있다. 구성원이지만 관리자가 아니면 403, 비구성원은 404다.
+        생성은 비동기이므로 202로 접수하고 Location 헤더가 상태 조회 경로를 가리킨다.
+        scope에 든 확정 기록이 5,000건을 넘으면 409 SCOPE_TOO_LARGE로 거절하고 아무것도 저장하지 않는다(C05).
+        scopeFrom이 scopeTo보다 늦거나 scopeRecordTypes가 비었거나 알 수 없는 유형이면 400이다.
+        outgoingOwnerId·incomingOwnerId가 이 프로젝트의 현재 구성원이 아니면 400이고 errors에 그 필드 이름이 담긴다
+        (요청자는 이미 프로젝트를 볼 수 있으므로 404로 숨기지 않는다). 두 담당자가 같은 사람이어도 400(incomingOwnerId)이다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateHandoverRequest'
+      responses:
+        '202':
+          description: 생성 접수. 상태는 조회 경로에서 확인한다.
+          headers:
+            Location:
+              description: 생성 상태를 조회할 경로
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Handover'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /handovers/{handoverId}:
+    parameters:
+      - $ref: '#/components/parameters/HandoverId'
+    get:
+      tags: [handovers]
+      operationId: getHandover
+      summary: 인수인계 상태와 패키지 요약 조회
+      description: |
+        S08의 진행률·포함 건수와 충돌 목록, S09의 패키지 개요를 함께 반환한다. 기간 안의 미확정 초안은
+        unconfirmedRecords로 경고한다.
+        상태가 FAILED이면 failureReason이 채워진다: INSUFFICIENT_EVIDENCE(근거 부족), MAX_ATTEMPTS_EXCEEDED(재시도 소진),
+        DEADLINE_EXCEEDED(2시간 기한 초과), GENERATION_ABANDONED(패키지 job이 실패 사유 없이 사라진 경우의 대체 값).
+        워커가 패키지 job을 가져가면 상태는 GENERATING이고, 이때도 version이 오른다.
+      responses:
+        '200':
+          description: 인수인계 상세
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HandoverDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /handovers/{handoverId}/retry:
+    parameters:
+      - $ref: '#/components/parameters/HandoverId'
+    post:
+      tags: [handovers]
+      operationId: retryHandoverGeneration
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 패키지 생성 재시도
+      description: FAILED 상태에서만 호출할 수 있다. 다른 상태에서는 409를 반환한다.
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '202':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 재시도 접수
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Handover'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /handovers/{handoverId}/items:
+    parameters:
+      - $ref: '#/components/parameters/HandoverId'
+    get:
+      tags: [handovers]
+      operationId: listHandoverItems
+      summary: 인수인계 항목 목록 조회
+      description: S09 좌측 메뉴와 S11 검토 목록이 함께 사용한다.
+      parameters:
+        - name: itemKind
+          in: query
+          required: false
+          description: 항목 구분 필터
+          schema:
+            $ref: '#/components/schemas/HandoverItemKind'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: 항목 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HandoverItemList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /handovers/{handoverId}/items/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/HandoverId'
+      - $ref: '#/components/parameters/ItemId'
+    patch:
+      tags: [handovers]
+      operationId: resolveHandoverItem
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 충돌 항목의 최종 근거 선택
+      description: |
+        FR-12. 관리자가 상충하는 기록 중 최종 근거를 고르고 사유를 남긴다.
+        시스템이 임의로 고르지 않는다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveHandoverItemRequest'
+      responses:
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '200':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 갱신된 항목
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HandoverItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /handovers/{handoverId}/approval:
+    parameters:
+      - $ref: '#/components/parameters/HandoverId'
+    post:
+      tags: [handovers]
+      operationId: decideHandoverCompletion
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 인수인계 완료 승인 또는 보완 요청
+      description: |
+        FR-13. `APPROVE`는 상태를 COMPLETED로, `REQUEST_REVISION`은 REVIEW_REQUESTED로 바꾼다.
+        준비도 미제출, 미확인 필수 기록, 미해소 충돌이 남아 있으면 승인은 409를 반환한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandoverApprovalRequest'
+      responses:
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '200':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 처리 후 인수인계 상세
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HandoverDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /handovers/{handoverId}/questions:
+    parameters:
+      - $ref: '#/components/parameters/HandoverId'
+    get:
+      tags: [qa]
+      operationId: listQuestions
+      summary: 질의응답 이력 조회
+      description: 질문과 답변을 시간순으로 반환한다. 답변에는 근거 목록이 함께 담긴다.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 질의응답 이력
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QaMessageList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [qa]
+      operationId: askQuestion
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 프로젝트 질문과 근거 기반 답변
+      description: |
+        FR-15·FR-16.
+        확인된 기록에서 근거를 찾으면 answerStatus는 ANSWERED이고 citations가 채워진다.
+        근거가 없으면 NO_EVIDENCE와 함께 추가 확인 대상을 반환하며 추측 답변을 만들지 않는다.
+        AI 처리 자체가 실패하면 FAILED를 반환하되 기록 조회 경로는 영향을 받지 않는다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AskQuestionRequest'
+      responses:
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '200':
+          description: meta → evidence → delta → done 또는 error 순서의 SSE 스트림
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '201':
+          description: 답변
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QaAnswer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '406':
+          $ref: '#/components/responses/NotAcceptable'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /handovers/{handoverId}/assessment:
+    parameters:
+      - $ref: '#/components/parameters/HandoverId'
+    get:
+      tags: [assessments]
+      operationId: getAssessment
+      summary: 업무 준비도 점검 문항과 응시 결과 조회
+      description: |
+        S10의 문항 목록과 지금까지의 응시 회차별 결과를 반환한다.
+        점검은 인수인계 패키지를 만들 때 세대마다 함께 만든다. 요청이나 재생성 직후 패키지가 아직 만들어지는 중이거나
+        생성에 실패해 현재 세대의 점검이 없으면 409 INVALID_STATE를 반환한다. 인수인계 상태가 READY가 되면 다시 조회한다.
+      responses:
+        '200':
+          description: 점검 상세
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssessmentDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /handovers/{handoverId}/assessment/attempts:
+    parameters:
+      - $ref: '#/components/parameters/HandoverId'
+    post:
+      tags: [assessments]
+      operationId: submitAssessmentAttempt
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 준비도 점검 답안 제출
+      description: |
+        FR-17. 제출하면 문항별 정오와 오답 문항이 연결된 기록 코드를 함께 반환한다.
+        재응시는 새 회차로 기록된다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitAttemptRequest'
+      responses:
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '201':
+          description: 채점 결과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssessmentAttempt'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{projectId}/record-relations:
+    parameters: [{$ref: '#/components/parameters/ProjectId'}]
+    post:
+      tags: [records]
+      operationId: createRecordRelation
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 확정 기록 관계 생성
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CreateRecordRelationRequest'}}}
+      responses:
+        '201':
+          description: 생성된 관계
+          content: {application/json: {schema: {$ref: '#/components/schemas/RecordRelation'}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /record-relations/{relationId}/withdrawal:
+    parameters: [{$ref: '#/components/parameters/RelationId'}]
+    post:
+      tags: [records]
+      operationId: withdrawRecordRelation
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 잘못 등록한 기록 관계 철회
+      description: |
+        그 관계가 속한 프로젝트의 PM만 철회한다(비구성원 404, PM이 아닌 구성원 403). 행은 지우지 않고 철회 시각·철회자·사유를
+        남긴다. 철회된 관계는 새 관계 검사, 기록 상세, 패키지 생성에서 없는 것으로 본다. 이미 게시된 세대의 충돌 항목은 남고,
+        철회된 관계의 항목은 해소할 수 없으며 승인 차단 사유는 `RELATIONS_WITHDRAWN`이 된다(패키지를 다시 만든다).
+        이미 철회된 관계는 409다.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WithdrawRecordRelationRequest'}}}
+      responses:
+        '200':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 철회된 관계
+          content: {application/json: {schema: {$ref: '#/components/schemas/RecordRelation'}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /connections/{connectionId}/files/{sourceId}/records:
+    parameters: [{$ref: '#/components/parameters/ConnectionId'}, {$ref: '#/components/parameters/SourceId'}]
+    post:
+      tags: [connections]
+      operationId: createManualDraft
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 실패한 원문에서 수동 초안 생성
+      description: |
+        ownerUserId가 이 프로젝트의 현재 구성원이 아니면 400이고 errors에 필드 이름이 담긴다. 원문이 요청자에게
+        보이지 않으면 404다.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CreateManualDraftRequest'}}}
+      responses:
+        '201':
+          description: AUTO_DRAFT 기록 생성
+          content: {application/json: {schema: {$ref: '#/components/schemas/RecordDetail'}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /connections/{connectionId}/files/{sourceId}/processing-attempts:
+    parameters: [{$ref: '#/components/parameters/ConnectionId'}, {$ref: '#/components/parameters/SourceId'}]
+    post:
+      tags: [connections]
+      operationId: retrySourceProcessing
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 실패한 원문 처리 재시도 접수
+      responses:
+        '202':
+          description: 처리 재시도 접수
+          content: {application/json: {schema: {$ref: '#/components/schemas/ProcessingAttempt'}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /handovers/{handoverId}/generations:
+    parameters: [{$ref: '#/components/parameters/HandoverId'}]
+    post:
+      tags: [handovers]
+      operationId: regenerateHandover
+      summary: 최신 확정 근거로 새 인수인계 세대 생성
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/RegenerateHandoverRequest'}}}
+      responses:
+        '202':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 재생성 접수
+          content: {application/json: {schema: {$ref: '#/components/schemas/Handover'}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /handovers/{handoverId}/items/{itemId}/acknowledgements:
+    parameters: [{$ref: '#/components/parameters/HandoverId'}, {$ref: '#/components/parameters/ItemId'}]
+    post:
+      tags: [handovers]
+      operationId: acknowledgeHandoverItem
+      summary: 현재 세대의 필수 항목을 명시적으로 확인
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '201':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 확인 이력 생성
+          content: {application/json: {schema: {$ref: '#/components/schemas/HandoverItemAcknowledgement'}}}
+        '200':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 기존 확인 이력 재전송
+          content: {application/json: {schema: {$ref: '#/components/schemas/HandoverItemAcknowledgement'}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /admin/organizations:
+    get:
+      tags: [admin]
+      operationId: listOrganizations
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      summary: 조직 목록 조회
+      description: FR-18. 시스템 관리자만 호출할 수 있다.
+      responses:
+        '200':
+          description: 조직 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [admin]
+      operationId: createOrganization
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 조직 생성
+      description: FR-18.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationUpsertRequest'
+      responses:
+        '201':
+          description: 생성된 조직
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /admin/organizations/{organizationId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    patch:
+      tags: [admin]
+      operationId: updateOrganization
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 조직 수정 또는 비활성화
+      description: 영구 삭제 대신 isActive를 false로 바꾼다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationUpdateRequest'
+      responses:
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '200':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 갱신된 조직
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [admin]
+      operationId: deleteOrganization
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 조직 삭제
+      description: |
+        오생성 취소용이다. 소속 사용자와 프로젝트가 없을 때만 지운다.
+        참조가 하나라도 남아 있으면 409로 거부하고 무엇이 막는지 알려준다.
+        이미 업무에 쓰인 대상은 비활성화(PATCH isActive=false)로 감춘다.
+        확인자를 지우면 기록이 왜 믿을 만한지 설명할 수 없게 되기 때문이다.
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '204':
+          description: 삭제되었다. 본문 없음.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/ReferenceConflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /admin/users:
+    get:
+      tags: [admin]
+      operationId: listUsers
+      summary: 사용자 목록 조회
+      description: FR-18. 이름·직급·조직·시스템 역할·활성 여부를 반환한다.
+      parameters:
+        - name: organizationId
+          in: query
+          required: false
+          description: 조직 필터
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+            maximum: 9007199254740991
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: 사용자 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [admin]
+      operationId: createUser
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 사용자 생성
+      description: FR-18.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreateRequest'
+      responses:
+        '201':
+          description: 생성된 사용자
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /admin/users/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    patch:
+      tags: [admin]
+      operationId: updateUser
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 사용자 수정 또는 비활성화
+      description: 영구 삭제 대신 isActive를 false로 바꾼다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRequest'
+      responses:
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '200':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 갱신된 사용자
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [admin]
+      operationId: deleteUser
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 사용자 삭제
+      description: |
+        오생성 취소용이다. 프로젝트 배정·기록 확인·인수인계 이력이 없을 때만 지운다.
+        참조가 하나라도 남아 있으면 409로 거부하고 무엇이 막는지 알려준다.
+        이미 업무에 쓰인 대상은 비활성화(PATCH isActive=false)로 감춘다.
+        확인자를 지우면 기록이 왜 믿을 만한지 설명할 수 없게 되기 때문이다.
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '204':
+          description: 삭제되었다. 본문 없음.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/ReferenceConflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /admin/users/{userId}/credential-tokens:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [admin]
+      operationId: issueCredentialToken
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+      summary: 초기 설정 코드 발급
+      description: |
+        FR-18, README §4.1. 시스템 관리자가 활성 LOCAL 계정에 일회용 설정 코드를 발급한다. 코드는 256비트 난수이고
+        **이 응답에만 평문으로 나간다.** 서버에는 해시만 남는다. 유효 시간은 기본 24시간이며 다시 발급하면 이전 코드는
+        무효다. 비활성 사용자, LOCAL이 아닌 계정, 시스템 관리자 계정은 409다(관리자의 비밀번호는 운영자가 재설정한다). Idempotency-Key는 받지 않는다. 멱등 재전송은 응답 본문을
+        저장하는데 그 본문이 평문 코드이기 때문이다.
+      responses:
+        '201':
+          description: 발급된 코드와 만료 시각
+          headers:
+            Cache-Control:
+              description: no-store
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialToken'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /admin/projects:
+    get:
+      tags: [admin]
+      operationId: listAllProjects
+      summary: 전체 프로젝트 목록 조회
+      description: FR-18·FR-22. 시스템 관리자는 참여 여부와 무관하게 전체를 조회한다.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: 프로젝트 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [admin]
+      operationId: createProject
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 프로젝트 생성
+      description: FR-18.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreateRequest'
+      responses:
+        '201':
+          description: 생성된 프로젝트
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /admin/projects/{projectId}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    patch:
+      tags: [admin]
+      operationId: updateProject
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 프로젝트 수정 또는 비활성화
+      description: 수행 상태와 별개로 isActive를 false로 바꿔 비활성화한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdateRequest'
+      responses:
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '200':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 갱신된 프로젝트
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [admin]
+      operationId: deleteProject
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 프로젝트 삭제
+      description: |
+        오생성 취소용이다. 구성원·기록·연동·인수인계가 없을 때만 지운다.
+        참조가 하나라도 남아 있으면 409로 거부하고 무엇이 막는지 알려준다.
+        이미 업무에 쓰인 대상은 비활성화(PATCH isActive=false)로 감춘다.
+        확인자를 지우면 기록이 왜 믿을 만한지 설명할 수 없게 되기 때문이다.
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '204':
+          description: 삭제되었다. 본문 없음.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/ReferenceConflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /admin/projects/{projectId}/members:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [admin]
+      operationId: listProjectMembers
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      summary: 프로젝트 구성원과 역할 조회
+      description: FR-18.
+      responses:
+        '200':
+          description: 구성원 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMemberList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [admin]
+      operationId: addProjectMember
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      summary: 프로젝트 구성원 배정
+      description: 한 사용자가 한 프로젝트에서 두 역할을 겸하면 409를 반환한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMemberUpsertRequest'
+      responses:
+        '201':
+          description: 배정된 구성원
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMember'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /admin/projects/{projectId}/members/{memberId}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+      - $ref: '#/components/parameters/MemberId'
+    patch:
+      tags: [admin]
+      operationId: updateProjectMember
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 구성원 역할 변경 또는 배정 종료
+      description: 배정 종료는 leftOn을 설정한다. 행을 삭제하지 않는다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMemberUpdateRequest'
+      responses:
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '200':
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          description: 갱신된 구성원
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMember'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [admin]
+      operationId: deleteProjectMember
+      parameters:
+        - $ref: '#/components/parameters/CsrfTokenHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      summary: 구성원 배정 삭제
+      description: |
+        오생성 취소용이다. 그 구성원이 확인한 기록이 없을 때만 지운다.
+        참조가 하나라도 남아 있으면 409로 거부하고 무엇이 막는지 알려준다.
+        이미 업무에 쓰인 대상은 비활성화(PATCH isActive=false)로 감춘다.
+        확인자를 지우면 기록이 왜 믿을 만한지 설명할 수 없게 되기 때문이다.
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '204':
+          description: 삭제되었다. 본문 없음.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/ReferenceConflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: BATON_SESSION
+      description: Spring Security JDBC 세션 쿠키. 브라우저 JavaScript는 값을 읽지 않는다.
+
+  headers:
+    ETag:
+      description: 응답 자원의 낙관적 잠금 버전
+      required: true
+      schema:
+        type: string
+        pattern: '^"[0-9]+"$'
+
+  parameters:
+    CsrfTokenHeader:
+      name: X-CSRF-TOKEN
+      in: header
+      required: true
+      schema: {type: string, minLength: 1}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, format: uuid}
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      description: 프로젝트 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 9007199254740991
+    RecordId:
+      name: recordId
+      in: path
+      required: true
+      description: 프로젝트 기록 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 9007199254740991
+    NoteId:
+      name: noteId
+      in: path
+      required: true
+      description: 빠른 메모 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 9007199254740991
+    ConnectionId:
+      name: connectionId
+      in: path
+      required: true
+      description: 연동 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 9007199254740991
+    SourceId:
+      name: sourceId
+      in: path
+      required: true
+      schema: {type: integer, format: int64, minimum: 1, maximum: 9007199254740991}
+    RelationId:
+      name: relationId
+      in: path
+      required: true
+      description: 기록 관계 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 9007199254740991
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema: {type: string, pattern: '^"[0-9]+"$'}
+    HandoverId:
+      name: handoverId
+      in: path
+      required: true
+      description: 인수인계 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 9007199254740991
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      description: 인수인계 항목 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 9007199254740991
+    OrganizationId:
+      name: organizationId
+      in: path
+      required: true
+      description: 조직 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 9007199254740991
+    UserId:
+      name: userId
+      in: path
+      required: true
+      description: 사용자 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 9007199254740991
+    MemberId:
+      name: memberId
+      in: path
+      required: true
+      description: 프로젝트 구성원 배정 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        maximum: 9007199254740991
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: 한 번에 가져올 최대 건수
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Offset:
+      name: offset
+      in: query
+      required: false
+      description: 건너뛸 건수
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 10000
+        default: 0
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: 마지막 정렬 키와 ID를 담은 불투명 base64url cursor. nonzero offset과 함께 사용할 수 없다.
+      schema:
+        type: string
+        maxLength: 1000
+
+  responses:
+    BadRequest:
+      description: 입력값이 올바르지 않다.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: 인증되지 않은 요청이다.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: 권한이 없다. 기록 내용은 노출하지 않고 접근 시도만 남긴다.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: 대상을 찾을 수 없다.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: 현재 상태에서 수행할 수 없는 요청이다.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    ReferenceConflict:
+      description: |
+        다른 데이터가 이 대상을 참조하고 있어 삭제할 수 없다.
+        무엇이 참조하는지 references에 담아 관리자가 비활성화로 전환할지 판단하게 한다.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ReferenceConflictProblem'
+
+    TooManyRequests:
+      description: 호출 한도를 초과했다.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    PreconditionFailed:
+      description: ETag 버전이 현재 행과 다르다.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    PreconditionRequired:
+      description: If-Match 헤더가 필요하다. code는 IF_MATCH_REQUIRED다.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    PayloadTooLarge:
+      description: 요청 본문이 1 MiB를 넘는다(C01). code는 PAYLOAD_TOO_LARGE다.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    UnsupportedMediaType:
+      description: 요청 본문이 application/json이 아니다.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    NotAcceptable:
+      description: 지원하지 않는 Accept 값이다.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    ServiceUnavailable:
+      description: 작업 큐가 포화됐거나(code=QUEUE_FULL, Retry-After=30) 필수 내부 서비스가 일시적으로 사용할 수 없다.
+      headers:
+        Retry-After:
+          schema: {type: integer, minimum: 1}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    InternalServerError:
+      description: 예상하지 못한 서버 오류다. code=INTERNAL_ERROR와 traceId만 싣고, 예외 메시지·스택·SQL·원문은 싣지 않는다.
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+
+  schemas:
+
+    SignInRequest:
+      type: object
+      additionalProperties: false
+      required: [employeeNo, password]
+      properties:
+        employeeNo:
+          type: string
+          description: 사내 계정 ID
+          minLength: 1
+        password:
+          type: string
+          format: password
+          description: 사내 계정 비밀번호. 서버는 해시로만 대조하고 원문을 저장하지 않는다.
+          minLength: 1
+
+    SetCredentialRequest:
+      type: object
+      additionalProperties: false
+      required: [employeeNo, token, newPassword]
+      properties:
+        employeeNo:
+          type: string
+          description: 사내 계정 ID
+          minLength: 1
+          maxLength: 64
+        token:
+          type: string
+          description: 관리자에게서 받은 일회용 설정 코드
+          minLength: 1
+          maxLength: 128
+        newPassword:
+          type: string
+          format: password
+          description: 새 비밀번호. 12~128자이고 사번과 달라야 한다. 서버는 해시로만 저장한다.
+          minLength: 12
+          maxLength: 128
+
+    CredentialToken:
+      type: object
+      required: [token, expiresAt]
+      properties:
+        token:
+          type: string
+          description: 일회용 설정 코드(base64url, 43자). 이 응답에서만 볼 수 있다.
+        expiresAt:
+          type: string
+          format: date-time
+          description: 코드가 만료되는 시각
+
+    Problem:
+      type: object
+      description: RFC 7807 형식의 공통 오류 응답
+      required: [type, title, status, code, traceId]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: 오류 유형 식별자
+        title:
+          type: string
+          description: 사람이 읽는 짧은 요약
+        status:
+          type: integer
+          description: HTTP 상태 코드
+        detail:
+          type: string
+          description: 이 요청에 한정된 설명
+        instance:
+          type: string
+          format: uri-reference
+          description: 오류가 발생한 경로
+        errors:
+          type: array
+          description: 입력값 오류의 필드별 목록
+          items:
+            $ref: '#/components/schemas/FieldError'
+        code:
+          type: string
+        traceId:
+          type: string
+
+    ReferenceConflictProblem:
+      description: 참조가 남아 삭제가 거부된 경우의 오류 응답
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required: [references]
+          properties:
+            references:
+              type: array
+              description: 삭제를 막고 있는 참조. 비어 있으면 삭제가 가능했다는 뜻이다.
+              items:
+                $ref: '#/components/schemas/BlockingReference'
+
+    BlockingReference:
+      type: object
+      description: 삭제 대상을 참조하는 데이터의 종류와 건수
+      required: [resource, count]
+      properties:
+        resource:
+          type: string
+          description: 참조하는 데이터의 종류(예 work_records, project_members, 사용자 삭제의 audit_events는 그 사용자가 행위자인 감사 행)
+          example: work_records
+        count:
+          type: integer
+          description: 참조하는 행의 수
+          example: 12
+        hint:
+          type: string
+          description: 관리자가 취할 수 있는 다음 행동
+          example: 비활성화로 전환하면 기록의 근거를 유지한 채 목록에서 감춘다.
+
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          description: 오류가 발생한 필드 경로
+        message:
+          type: string
+          description: 오류 사유
+
+    PageMeta:
+      type: object
+      description: 목록 응답의 공통 페이지 정보
+      required: [total, limit, offset]
+      properties:
+        total:
+          type: integer
+          minimum: 0
+          description: 조건에 맞는 전체 건수
+        limit:
+          type: integer
+          description: 이번 응답의 최대 건수
+        offset:
+          type: integer
+          minimum: 0
+          description: 건너뛴 건수
+        nextCursor:
+          type: string
+          nullable: true
+          maxLength: 1000
+
+    RecordType:
+      type: string
+      description: 기록 유형 여섯 가지
+      enum: [SCHEDULE, CHANGE_DECISION, COMMITMENT, BLOCKER, SCOPE_EXCEPTION, OPEN_ISSUE]
+
+    RecordTrustStatus:
+      type: string
+      description: 기록 신뢰 상태 네 가지. 대체 여부는 상태가 아니라 관계로 표현한다.
+      enum: [AUTO_DRAFT, CONFIRMED, CORRECTED, DISMISSED]
+
+    RecordRelationType:
+      type: string
+      description: 기록 사이의 관계
+      enum: [SUPERSEDES, REFERENCES, CONFLICTS_WITH]
+
+    SourceChannel:
+      type: string
+      description: 기록 수집 채널
+      enum: [EMAIL, APPROVAL, MESSENGER, MEETING_MINUTES, CLOUD_PROJECT_FOLDER]
+
+    ConnectionStatus:
+      type: string
+      description: 연동의 연결 상태
+      enum: [ACTIVE, PAUSED, DISCONNECTED]
+
+    SourceHealth:
+      type: string
+      description: 연동의 수집 상태
+      enum: [NORMAL, DELAYED, FAILED]
+
+    IngestionStatus:
+      type: string
+      description: 수집 실행 결과
+      enum: [SUCCEEDED, DELAYED, FAILED]
+
+    SystemRole:
+      type: string
+      description: 시스템 전역 역할
+      enum: [USER, SYSTEM_ADMIN]
+
+    ProjectRole:
+      type: string
+      description: 프로젝트 안에서의 역할
+      enum: [OUTGOING_OWNER, INCOMING_OWNER, PROJECT_MANAGER, MEMBER]
+
+    ProjectStatus:
+      type: string
+      description: 프로젝트 수행 상태
+      enum: [PLANNED, ON_TRACK, AT_RISK, CLOSED]
+
+    HandoverStatus:
+      type: string
+      description: 인수인계 진행 상태
+      enum: [REQUESTED, GENERATING, READY, REVIEW_REQUESTED, COMPLETED, FAILED]
+
+    HandoverItemKind:
+      type: string
+      description: 인수인계 항목 구분
+      enum: [OVERVIEW, KEY_DECISION, CHANGE, COMMITMENT, OPEN_RISK, SCHEDULE, FOLLOW_UP]
+
+    QaAnswerStatus:
+      type: string
+      description: 답변 상태
+      enum: [ANSWERED, NO_EVIDENCE, FAILED]
+
+    AssessmentStatus:
+      type: string
+      description: |
+        준비도 점검 진행 상태. 점검은 제출 전(NOT_STARTED)과 제출 뒤(SUBMITTED)뿐이다. DB enum assessment_status에는
+        IN_PROGRESS가 남아 있지만 어떤 코드도 쓰지 않는다(PostgreSQL은 enum 값 삭제에 타입 재생성이 필요해 남겼다).
+      enum: [NOT_STARTED, SUBMITTED]
+
+    QuestionType:
+      type: string
+      description: 점검 문항 유형
+      enum: [MULTIPLE_CHOICE, SHORT_ANSWER]
+
+    Organization:
+      type: object
+      required: [id, name, isActive, version]
+      properties:
+        version:
+          type: integer
+          format: int64
+          maximum: 9007199254740991
+          minimum: 0
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 조직 식별자
+        name:
+          type: string
+          description: 조직명
+        isActive:
+          type: boolean
+          description: 활성 여부
+        userCount:
+          type: integer
+          description: 소속 사용자 수
+
+    OrganizationList:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          description: 조직 목록
+          items:
+            $ref: '#/components/schemas/Organization'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    OrganizationUpsertRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: 조직명
+
+    OrganizationUpdateRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: 전달한 필드만 변경한다.
+      properties:
+        name:
+          type: string
+          description: 조직명
+        isActive:
+          type: boolean
+          description: 활성 여부
+
+    User:
+      type: object
+      required: [id, employeeNo, name, title, email, systemRole, isActive, organizationId, authProvider, loginEnabled, version]
+      properties:
+        version:
+          type: integer
+          format: int64
+          maximum: 9007199254740991
+          minimum: 0
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 사용자 식별자
+        employeeNo:
+          type: string
+          description: 사내 계정 ID
+        name:
+          type: string
+          description: 이름
+        title:
+          type: string
+          description: 직급
+        email:
+          type: string
+          format: email
+          description: 사내 메일 주소
+        systemRole:
+          $ref: '#/components/schemas/SystemRole'
+        isActive:
+          type: boolean
+          description: 활성 여부
+        organizationId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 소속 조직 식별자
+        organizationName:
+          type: string
+          description: 소속 조직명
+        authProvider:
+          type: string
+          enum: [LOCAL, OIDC]
+        loginEnabled:
+          type: boolean
+          description: LOCAL 자격증명 또는 연결된 OIDC subject가 준비됐는지 나타낸다.
+
+    UserList:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          description: 사용자 목록
+          items:
+            $ref: '#/components/schemas/User'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    UserCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [organizationId, employeeNo, name, title, email]
+      properties:
+        organizationId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 소속 조직 식별자
+        employeeNo:
+          type: string
+          description: 사내 계정 ID
+        name:
+          type: string
+          description: 이름
+        title:
+          type: string
+          description: 직급
+        email:
+          type: string
+          format: email
+          description: 사내 메일 주소
+        systemRole:
+          $ref: '#/components/schemas/SystemRole'
+
+    UserUpdateRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: 전달한 필드만 변경한다.
+      properties:
+        name:
+          type: string
+          description: 이름
+        title:
+          type: string
+          description: 직급
+        organizationId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 소속 조직 식별자
+        systemRole:
+          $ref: '#/components/schemas/SystemRole'
+        isActive:
+          type: boolean
+          description: 활성 여부
+
+    CurrentUser:
+      type: object
+      required: [user, memberships]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        memberships:
+          type: array
+          description: 참여 중인 프로젝트와 역할
+          items:
+            $ref: '#/components/schemas/ProjectMembership'
+        accountActivity:
+          type: array
+          maxItems: 5
+          description: |
+            본인 계정에 일어난 보안 관련 일의 최근 5건(최신순). 본인의 로그인(`SIGN_IN`)과 본인이 대상인 설정 코드 발급·설정
+            (`ISSUE_CREDENTIAL_TOKEN`, `SET_CREDENTIAL`), 운영자가 시스템 관리자의 비밀번호를 재설정한 일(`RESET_SYSTEM_ADMIN_CREDENTIAL`, 요청 주소 없음)이다. 모르는 주소가 보이면 관리자에게 알린다. 메일 같은 바깥 채널은 없어
+            로그인할 수 있는 사람에게만 보인다. 남의 활동은 담기지 않는다.
+          items:
+            type: object
+            required: [action, occurredAt]
+            properties:
+              action:
+                type: string
+                enum: [SIGN_IN, ISSUE_CREDENTIAL_TOKEN, SET_CREDENTIAL, RESET_SYSTEM_ADMIN_CREDENTIAL]
+              occurredAt:
+                type: string
+                format: date-time
+              remoteAddress:
+                type: string
+                nullable: true
+                maxLength: 64
+                description: 요청이 온 주소. 기록되지 않은 행은 null이고, 보존 스위치를 켠 운영에서는 24개월이 지난 로그인의 주소도 비워져 null이다(행은 남는다)
+
+    ProjectMembership:
+      type: object
+      required: [projectId, projectCode, projectName, projectRole]
+      properties:
+        projectId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 프로젝트 식별자
+        projectCode:
+          type: string
+          description: 프로젝트 코드
+        projectName:
+          type: string
+          description: 프로젝트명
+        projectRole:
+          $ref: '#/components/schemas/ProjectRole'
+
+    Project:
+      type: object
+      required: [id, code, name, deliveringCompany, clientCompany, startedOn, endsOn, phase, status, isActive, version]
+      properties:
+        version:
+          type: integer
+          format: int64
+          maximum: 9007199254740991
+          minimum: 0
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 프로젝트 식별자
+        code:
+          type: string
+          description: 프로젝트 코드
+        name:
+          type: string
+          description: 프로젝트명
+        deliveringCompany:
+          type: string
+          description: 수행사
+        clientCompany:
+          type: string
+          description: 고객사
+        startedOn:
+          type: string
+          format: date
+          description: 수행 시작일
+        endsOn:
+          type: string
+          format: date
+          description: 수행 종료일
+        phase:
+          type: string
+          description: 현재 단계
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        isActive:
+          type: boolean
+          description: 관리자 활성 여부
+
+    ProjectList:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          description: 프로젝트 목록
+          items:
+            $ref: '#/components/schemas/Project'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    ProjectDetail:
+      allOf:
+        - $ref: '#/components/schemas/Project'
+        - type: object
+          properties:
+            myRole:
+              $ref: '#/components/schemas/ProjectRole'
+            pendingRecordCount:
+              type: integer
+              description: 확인 대기 기록 수
+            openRiskCount:
+              type: integer
+              description: 미해결 위험 수
+
+    ProjectCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, deliveringCompany, clientCompany, startedOn, endsOn, phase, status]
+      properties:
+        code:
+          type: string
+          description: 프로젝트 코드
+        name:
+          type: string
+          description: 프로젝트명
+        deliveringCompany:
+          type: string
+          description: 수행사
+        clientCompany:
+          type: string
+          description: 고객사
+        startedOn:
+          type: string
+          format: date
+          description: 수행 시작일
+        endsOn:
+          type: string
+          format: date
+          description: 수행 종료일
+        phase:
+          type: string
+          description: 현재 단계
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+
+    ProjectUpdateRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: 전달한 필드만 변경한다.
+      properties:
+        name:
+          type: string
+          description: 프로젝트명
+        phase:
+          type: string
+          description: 현재 단계
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        isActive:
+          type: boolean
+          description: 관리자 활성 여부
+
+    ProjectMember:
+      type: object
+      required: [id, userId, userName, userTitle, projectRole, joinedOn, version]
+      properties:
+        version:
+          type: integer
+          format: int64
+          maximum: 9007199254740991
+          minimum: 0
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 배정 식별자
+        userId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 사용자 식별자
+        userName:
+          type: string
+          description: 이름
+        userTitle:
+          type: string
+          description: 직급
+        projectRole:
+          $ref: '#/components/schemas/ProjectRole'
+        joinedOn:
+          type: string
+          format: date
+          description: 배정 시작일
+        leftOn:
+          type: string
+          format: date
+          nullable: true
+          description: 배정 종료일. 담당자 교체 완료 시 설정된다.
+
+    ProjectMemberList:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          description: 구성원 목록
+          items:
+            $ref: '#/components/schemas/ProjectMember'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    ProjectMemberUpsertRequest:
+      type: object
+      additionalProperties: false
+      required: [userId, projectRole, joinedOn]
+      properties:
+        userId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 사용자 식별자
+        projectRole:
+          $ref: '#/components/schemas/ProjectRole'
+        joinedOn:
+          type: string
+          format: date
+          description: 배정 시작일
+
+    ProjectMemberUpdateRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: 전달한 필드만 변경한다.
+      properties:
+        projectRole:
+          $ref: '#/components/schemas/ProjectRole'
+        leftOn:
+          type: string
+          format: date
+          description: 배정 종료일
+
+    DashboardSummary:
+      type: object
+      required: [projectCount, pendingRecordCount, activeHandoverCount, failedJobCount, projects]
+      properties:
+        projectCount:
+          type: integer
+          description: 내 프로젝트 수
+        pendingRecordCount:
+          type: integer
+          description: 확인 대기 기록 수
+        activeHandoverCount:
+          type: integer
+          description: 진행 중 인수인계 수
+        failedJobCount:
+          type: integer
+          description: 수집 실패 작업 수
+        projects:
+          type: array
+          description: 최근 접근 프로젝트와 내 역할
+          items:
+            $ref: '#/components/schemas/ProjectDetail'
+        connectionHealth:
+          type: array
+          description: 조회 가능한 범위의 연동 상태 요약
+          items:
+            $ref: '#/components/schemas/SourceConnection'
+        assignedHandover:
+          allOf:
+            - $ref: '#/components/schemas/Handover'
+          description: 신규 담당자에게 배정된 인수인계. 배정 전에는 이 필드를 생략하며 화면은 빈 상태를 표시한다.
+
+    SourceConnection:
+      type: object
+      required: [id, projectId, channel, displayName, status, health, version]
+      properties:
+        version:
+          type: integer
+          format: int64
+          maximum: 9007199254740991
+          minimum: 0
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 연동 식별자
+        projectId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 프로젝트 식별자
+        ownerUserId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          nullable: true
+          description: 개인 연결의 소유자. null이면 프로젝트 공용 연동이다.
+        channel:
+          $ref: '#/components/schemas/SourceChannel'
+        displayName:
+          type: string
+          description: 화면에 보이는 연동 이름
+        externalRef:
+          type: string
+          nullable: true
+          description: 연결 대상 위치
+        status:
+          $ref: '#/components/schemas/ConnectionStatus'
+        health:
+          $ref: '#/components/schemas/SourceHealth'
+        lastCollectedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 마지막 수집 시각
+
+    SourceConnectionList:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          description: 연동 목록
+          items:
+            $ref: '#/components/schemas/SourceConnection'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    SourceConnectionDetail:
+      allOf:
+        - $ref: '#/components/schemas/SourceConnection'
+        - type: object
+          properties:
+            lastStatus:
+              allOf:
+                - $ref: '#/components/schemas/IngestionStatus'
+              nullable: true
+              description: 아직 한 번도 수집하지 않았으면 null
+            lastCollectedCount:
+              type: integer
+              description: 마지막 실행의 수집 건수
+            lastFailedCount:
+              type: integer
+              description: 마지막 실행의 실패 건수
+            lastMessage:
+              type: string
+              nullable: true
+              description: 마지막 실행의 실패 또는 지연 사유. 없으면 null
+            collectedFileCount:
+              type: integer
+              description: 수집된 문서 수
+            draftCandidateCount:
+              type: integer
+              description: 이 연동에서 생성된 확인 대기 기록 수
+
+    CreateSourceConnectionRequest:
+      type: object
+      additionalProperties: false
+      required: [channel, displayName, externalRef]
+      properties:
+        channel:
+          $ref: '#/components/schemas/SourceChannel'
+        displayName:
+          type: string
+          description: 화면에 보이는 연동 이름
+        externalRef:
+          type: string
+          description: 승인된 클라우드 저장소의 폴더 경로 또는 외부 시스템 식별자
+
+    UpdateSourceConnectionRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: 전달한 필드만 변경한다. status를 DISCONNECTED로 바꾸는 것이 해제다.
+      properties:
+        displayName:
+          type: string
+          description: 화면에 보이는 연동 이름
+        externalRef:
+          type: string
+          description: 연결 대상 위치
+        status:
+          $ref: '#/components/schemas/ConnectionStatus'
+
+    CollectedFile:
+      type: object
+      required: [id, displayName, collectedAt, processingStatus]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 수집 문서 식별자
+        displayName:
+          type: string
+          description: 문서·파일명
+        externalRef:
+          type: string
+          nullable: true
+          description: 원문 위치
+        collectedAt:
+          type: string
+          format: date-time
+          description: 수집 시각
+        derivedRecordCodes:
+          type: array
+          description: 이 문서에서 생성된 기록 코드
+          items:
+            type: string
+        processingStatus:
+          type: string
+          enum: [PENDING, PROCESSING, SUCCEEDED, FAILED]
+        failureCode:
+          type: string
+          maxLength: 60
+          nullable: true
+
+    CollectedFileList:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          description: 수집 문서 목록
+          items:
+            $ref: '#/components/schemas/CollectedFile'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+
+
+    PersonalNote:
+      type: object
+      required: [id, code, projectId, body, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 메모 식별자
+        code:
+          type: string
+          description: 화면이 참조하는 메모 코드
+        projectId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 프로젝트 식별자
+        body:
+          type: string
+          description: 원본 전문. 작성자에게만 반환한다.
+        createdAt:
+          type: string
+          format: date-time
+          description: 작성 시각
+        sharedRecordCodes:
+          type: array
+          description: 이 메모의 요약으로 생성된 프로젝트 기록 코드
+          items:
+            type: string
+
+    PersonalNoteList:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          description: 메모 목록
+          items:
+            $ref: '#/components/schemas/PersonalNote'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    CreatePersonalNoteRequest:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body:
+          type: string
+          description: 메모 원본 전문
+
+    ShareNoteSummaryRequest:
+      type: object
+      additionalProperties: false
+      required: [recordType, title, summary, occurredOn]
+      properties:
+        recordType:
+          $ref: '#/components/schemas/RecordType'
+        title:
+          type: string
+          description: 공유할 기록의 제목
+        summary:
+          type: string
+          description: 사용자가 직접 고른 요약. 원본 전문은 전달하지 않는다.
+        occurredOn:
+          type: string
+          format: date
+          description: 발생일
+        ownerUserId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          nullable: true
+          description: 후속 담당자
+        dueOn:
+          type: string
+          format: date
+          nullable: true
+          description: 기한
+
+    RecordSourceRef:
+      type: object
+      description: 기록의 원문 출처. 연동 설정이 아니라 개별 문서를 가리킨다.
+      required: [id, displayName, channel]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 수집 문서 식별자
+        displayName:
+          type: string
+          description: 출처 문서명
+        channel:
+          $ref: '#/components/schemas/SourceChannel'
+        externalRef:
+          type: string
+          nullable: true
+          description: 원문 위치
+
+    WorkRecord:
+      type: object
+      required: [id, code, projectId, recordType, title, summary, occurredOn, trustStatus, authorName, version]
+      properties:
+        version:
+          type: integer
+          format: int64
+          maximum: 9007199254740991
+          minimum: 0
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 기록 식별자
+        code:
+          type: string
+          description: 화면과 문항이 참조하는 기록 코드
+        projectId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 프로젝트 식별자
+        recordType:
+          $ref: '#/components/schemas/RecordType'
+        title:
+          type: string
+          description: 제목
+        summary:
+          type: string
+          description: 추출 요약. 메모 파생 기록은 사용자가 고른 요약이다.
+        occurredOn:
+          type: string
+          format: date
+          description: 발생일
+        trustStatus:
+          $ref: '#/components/schemas/RecordTrustStatus'
+        authorName:
+          type: string
+          description: 원문 작성자 이름
+        ownerName:
+          type: string
+          nullable: true
+          description: 담당자 이름
+        dueOn:
+          type: string
+          format: date
+          nullable: true
+          description: 기한
+        source:
+          allOf:
+            - $ref: '#/components/schemas/RecordSourceRef'
+          description: 수집 문서에서 만든 기록의 출처. 메모 공유로 만든 기록에서는 생략한다.
+        sourceNoteCode:
+          type: string
+          nullable: true
+          description: 메모 공유로 만든 기록의 원본 메모 코드
+        supersededByCode:
+          type: string
+          nullable: true
+          description: 이 기록을 대체한 기록의 코드
+
+    RecordList:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          description: 기록 목록
+          items:
+            $ref: '#/components/schemas/WorkRecord'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    RecordDetail:
+      allOf:
+        - $ref: '#/components/schemas/WorkRecord'
+        - type: object
+          properties:
+            originalExcerpt:
+              type: string
+              description: S05 좌측에 표시하는 원문 발췌. 메모 파생 기록에는 공유 요약만 담긴다.
+            confirmedByName:
+              type: string
+              nullable: true
+              description: 확인한 사용자 이름
+            confirmedAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: 확인 시각
+            revisions:
+              type: array
+              description: 수정 이력
+              items:
+                $ref: '#/components/schemas/RecordRevision'
+            relations:
+              type: array
+              description: 대체·충돌·참조 관계
+              items:
+                $ref: '#/components/schemas/RecordRelation'
+
+    RecordRevision:
+      type: object
+      required: [revisionNo, changedByName, changeReason, beforeSummary, afterSummary, changedAt]
+      properties:
+        revisionNo:
+          type: integer
+          description: 수정 회차
+        changedByName:
+          type: string
+          description: 수정한 사용자 이름
+        changeReason:
+          type: string
+          description: 수정 사유
+        beforeSummary:
+          type: string
+          description: 수정 전 요약
+        afterSummary:
+          type: string
+          description: 수정 후 요약
+        changedAt:
+          type: string
+          format: date-time
+          description: 수정 시각
+
+    RecordRelation:
+      type: object
+      required: [id, version, projectId, fromRecordId, toRecordId, relationType]
+      properties:
+        id:
+          type: integer
+          format: int64
+          maximum: 9007199254740991
+        version:
+          type: integer
+          format: int64
+          maximum: 9007199254740991
+          minimum: 0
+        projectId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+        fromRecordId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+        toRecordId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+        relationType:
+          $ref: '#/components/schemas/RecordRelationType'
+        relatedRecordId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 상대 기록 식별자
+        relatedRecordCode:
+          type: string
+          description: 상대 기록 코드
+        relatedRecordTitle:
+          type: string
+          description: 상대 기록 제목
+        note:
+          type: string
+          nullable: true
+          description: 관계 설명
+        withdrawnAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 철회 시각. 철회되지 않은 관계는 null
+        withdrawalReason:
+          type: string
+          nullable: true
+          description: 철회 사유
+
+    ReviewRecordRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action:
+          type: string
+          description: 확인 행동. CORRECT는 수정 내용과 사유가 함께 필요하다.
+          enum: [CONFIRM, CORRECT, DISMISS]
+        title:
+          type: string
+          description: 수정한 제목
+        summary:
+          type: string
+          description: 수정한 요약
+        recordType:
+          $ref: '#/components/schemas/RecordType'
+        ownerUserId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          nullable: true
+          description: 확인하며 지정한 담당자
+        dueOn:
+          type: string
+          format: date
+          nullable: true
+          description: 확인하며 지정한 기한
+        changeReason:
+          type: string
+          description: 수정 사유. action이 CORRECT이면 필수다.
+
+    Handover:
+      type: object
+      required: [id, code, projectId, status, outgoingOwnerName, incomingOwnerName, effectiveOn, generation, version]
+      properties:
+        version:
+          type: integer
+          format: int64
+          maximum: 9007199254740991
+          minimum: 0
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 인수인계 식별자
+        code:
+          type: string
+          description: 인수인계 코드
+        projectId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 프로젝트 식별자
+        status:
+          $ref: '#/components/schemas/HandoverStatus'
+        outgoingOwnerName:
+          type: string
+          description: 기존 담당자 이름
+        incomingOwnerName:
+          type: string
+          description: 신규 담당자 이름
+        effectiveOn:
+          type: string
+          format: date
+          description: 교체 적용일
+        progressPercent:
+          type: integer
+          description: 생성 진행률
+        requestedAt:
+          type: string
+          format: date-time
+          description: 요청 시각
+        generation:
+          type: integer
+          minimum: 1
+
+    HandoverList:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          description: 인수인계 목록. 배정이 없으면 빈 배열이다.
+          items:
+            $ref: '#/components/schemas/Handover'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    HandoverDetail:
+      allOf:
+        - $ref: '#/components/schemas/Handover'
+        - type: object
+          properties:
+            scopeFrom:
+              type: string
+              format: date
+              description: 포함 기간 시작
+            scopeTo:
+              type: string
+              format: date
+              description: 포함 기간 종료
+            scopeRecordTypes:
+              type: array
+              description: 포함하기로 선택한 기록 유형
+              items:
+                $ref: '#/components/schemas/RecordType'
+            includeNoteDerivedRecords:
+              type: boolean
+              description: 메모 공유로 생성된 기록의 포함 여부
+            includedCount:
+              type: integer
+              description: 포함 건수
+            revisionComment:
+              type: string
+              nullable: true
+              maxLength: 500
+              description: 가장 최근 보완 요청(REQUEST_REVISION)의 사유. 후임자가 무엇을 보완할지 본다(FR-13)
+            failureReason:
+              type: string
+              nullable: true
+              description: 생성 실패 사유
+            conflicts:
+              type: array
+              description: 상충하거나 대체 관계에 있는 기록 쌍
+              items:
+                $ref: '#/components/schemas/RecordRelation'
+            unconfirmedRecords:
+              type: array
+              description: 아직 확인되지 않은 기록
+              items:
+                $ref: '#/components/schemas/WorkRecord'
+            approvalBlockers:
+              type: array
+              description: 완료 승인을 막고 있는 사유
+              items:
+                type: string
+            readyAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: 열람 가능해진 시각
+            completedAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: 완료 승인 시각
+
+    CreateHandoverRequest:
+      type: object
+      additionalProperties: false
+      required: [outgoingOwnerId, incomingOwnerId, effectiveOn, scopeFrom, scopeTo, scopeRecordTypes]
+      properties:
+        outgoingOwnerId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 기존 담당자 식별자
+        incomingOwnerId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 신규 담당자 식별자
+        effectiveOn:
+          type: string
+          format: date
+          description: 교체 적용일
+        scopeFrom:
+          type: string
+          format: date
+          description: 포함 기간 시작
+        scopeTo:
+          type: string
+          format: date
+          description: 포함 기간 종료
+        scopeRecordTypes:
+          type: array
+          description: 포함할 기록 유형. 최소 한 개가 필요하다.
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/RecordType'
+        includeNoteDerivedRecords:
+          type: boolean
+          default: true
+          description: 메모 공유로 생성된 기록의 포함 여부
+
+    HandoverItem:
+      type: object
+      required: [id, itemKind, title, body, displayOrder, isRequired, generation, acknowledged, version]
+      properties:
+        version:
+          type: integer
+          format: int64
+          maximum: 9007199254740991
+          minimum: 0
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 항목 식별자
+        itemKind:
+          $ref: '#/components/schemas/HandoverItemKind'
+        title:
+          type: string
+          description: 항목 제목
+        body:
+          type: string
+          description: 항목 본문
+        displayOrder:
+          type: integer
+          description: 표시 순서
+        isRequired:
+          type: boolean
+          description: 완료 승인 전 확인이 필요한 항목인지 여부
+        evidence:
+          allOf:
+            - $ref: '#/components/schemas/WorkRecord'
+          description: 근거 기록. OVERVIEW처럼 근거가 없는 항목에서는 생략한다.
+        resolvedByRecordCode:
+          type: string
+          nullable: true
+          description: 관리자가 최종 근거로 고른 기록의 코드
+        resolutionNote:
+          type: string
+          nullable: true
+          description: 충돌 해소 사유
+        assigneeName:
+          type: string
+          nullable: true
+          description: 후속 작업 담당자
+        dueOn:
+          type: string
+          format: date
+          nullable: true
+          description: 후속 작업 기한
+        generation:
+          type: integer
+          minimum: 1
+        acknowledged:
+          type: boolean
+          description: 요청 사용자가 현재 세대에서 명시적으로 확인했는지 여부
+        conflictId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          nullable: true
+        candidateRecordIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+            minimum: 1
+            maximum: 9007199254740991
+
+    HandoverItemList:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          description: 인수인계 항목 목록
+          items:
+            $ref: '#/components/schemas/HandoverItem'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    ResolveHandoverItemRequest:
+      type: object
+      additionalProperties: false
+      required: [resolvedByRecordId, resolutionNote]
+      properties:
+        resolvedByRecordId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 최종 근거로 선택한 기록 식별자
+        resolutionNote:
+          type: string
+          maxLength: 300
+          description: 선택 사유. 저장 열(varchar(300))의 폭과 같다.
+
+    HandoverApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          description: 완료 승인 또는 보완 요청
+          enum: [APPROVE, REQUEST_REVISION]
+        comment:
+          type: string
+          description: 보완 요청 사유. REQUEST_REVISION일 때만 보낸다(필수). APPROVE에 보내면 400이다
+
+    QaCitation:
+      type: object
+      required: [recordCode, recordTitle, sourceName, trustStatusAtAnswer, isPrimary]
+      properties:
+        recordId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 근거 기록 식별자
+        recordCode:
+          type: string
+          description: 근거 기록 코드
+        recordTitle:
+          type: string
+          description: 근거 기록 제목
+        sourceName:
+          type: string
+          description: 출처 문서명
+        occurredOn:
+          type: string
+          format: date
+          description: 근거 기록의 발생일
+        trustStatusAtAnswer:
+          $ref: '#/components/schemas/RecordTrustStatus'
+        isPrimary:
+          type: boolean
+          description: false이면 보조 표시다. 예를 들어 대체된 이전 기록이다.
+
+    QaMessage:
+      type: object
+      required: [id, role, content, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 메시지 식별자
+        role:
+          type: string
+          description: 메시지 작성 주체
+          enum: [USER, ASSISTANT]
+        content:
+          type: string
+          description: 질문 또는 답변 본문
+        createdAt:
+          type: string
+          format: date-time
+          description: 작성 시각
+
+    QaAnswer:
+      allOf:
+        - $ref: '#/components/schemas/QaMessage'
+        - type: object
+          properties:
+            answerStatus:
+              $ref: '#/components/schemas/QaAnswerStatus'
+            citations:
+              type: array
+              description: ANSWERED일 때의 근거 목록
+              items:
+                $ref: '#/components/schemas/QaCitation'
+            suggestedContacts:
+              type: string
+              nullable: true
+              description: NO_EVIDENCE일 때 확인할 사람
+            suggestedDocuments:
+              type: string
+              nullable: true
+              description: NO_EVIDENCE일 때 확인할 문서
+
+    QaMessageList:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          description: 질의응답 이력
+          items:
+            $ref: '#/components/schemas/QaAnswer'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    AskQuestionRequest:
+      type: object
+      additionalProperties: false
+      required: [question]
+      properties:
+        question:
+          type: string
+          description: 프로젝트에 대한 질문
+          minLength: 1
+
+    AssessmentQuestion:
+      type: object
+      required: [id, questionNo, questionType, prompt, linkedRecordCode, choices]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 문항 식별자
+        questionNo:
+          type: integer
+          description: 문항 번호
+        questionType:
+          $ref: '#/components/schemas/QuestionType'
+        prompt:
+          type: string
+          description: 문항 내용
+        linkedRecordCode:
+          type: string
+          description: 오답일 때 이동할 근거 기록 코드
+        choices:
+          type: array
+          nullable: true
+          minItems: 2
+          maxItems: 5
+          description: 객관식 문항에서만 공개하는 선택지. 정답 ID는 응답하지 않는다.
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, text]
+            properties:
+              id:
+                type: string
+                maxLength: 32
+              text:
+                type: string
+                maxLength: 300
+
+    AssessmentDetail:
+      type: object
+      required: [generation, status, passThreshold, questions, attempts]
+      properties:
+        generation:
+          type: integer
+          minimum: 1
+        status:
+          $ref: '#/components/schemas/AssessmentStatus'
+        passThreshold:
+          type: integer
+          description: 관리자 승인 가능 최소 정답 수
+        questions:
+          type: array
+          description: 점검 문항
+          items:
+            $ref: '#/components/schemas/AssessmentQuestion'
+        attempts:
+          type: array
+          description: 응시 회차별 결과
+          items:
+            $ref: '#/components/schemas/AssessmentAttempt'
+
+    AssessmentAttempt:
+      type: object
+      required: [attemptNo, score, total, answers]
+      properties:
+        attemptNo:
+          type: integer
+          description: 응시 회차
+        score:
+          type: integer
+          description: 정답 수
+        total:
+          type: integer
+          description: 총 문항 수
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 제출 시각
+        answers:
+          type: array
+          description: 문항별 정오와 재확인 대상
+          items:
+            $ref: '#/components/schemas/AssessmentAnswer'
+
+    AssessmentAnswer:
+      type: object
+      required: [questionId, questionNo, answerText, isCorrect]
+      properties:
+        questionId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+          description: 문항 식별자
+        questionNo:
+          type: integer
+          description: 문항 번호
+        answerText:
+          type: string
+          description: 제출한 답안
+        isCorrect:
+          type: boolean
+          description: 정답 여부
+        linkedRecordCode:
+          type: string
+          nullable: true
+          description: 오답일 때 다시 확인할 기록 코드
+
+    SubmitAttemptRequest:
+      type: object
+      additionalProperties: false
+      required: [answers]
+      properties:
+        answers:
+          type: array
+          description: 문항별 답안
+          minItems: 1
+          items:
+            type: object
+            required: [questionId, answerText]
+            properties:
+              questionId:
+                type: integer
+                format: int64
+                minimum: 1
+                maximum: 9007199254740991
+                description: 문항 식별자
+              answerText:
+                type: string
+                description: 제출할 답안
+
+    CsrfToken:
+      type: object
+      required: [token, headerName]
+      properties:
+        token: {type: string, minLength: 1}
+        headerName: {type: string, enum: [X-CSRF-TOKEN]}
+
+    ProcessingAttempt:
+      type: object
+      additionalProperties: false
+      required: [sourceId, status]
+      properties:
+        sourceId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+        status:
+          type: string
+          enum: [PENDING]
+
+    HandoverItemAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [itemId, userId, generation, acknowledgedAt]
+      properties:
+        itemId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+        userId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+        generation:
+          type: integer
+          minimum: 1
+        acknowledgedAt:
+          type: string
+          format: date-time
+
+    CreateRecordRelationRequest:
+      type: object
+      additionalProperties: false
+      required: [fromRecordId, toRecordId, relationType]
+      properties:
+        fromRecordId: {type: integer, format: int64, minimum: 1, maximum: 9007199254740991}
+        toRecordId: {type: integer, format: int64, minimum: 1, maximum: 9007199254740991}
+        relationType: {$ref: '#/components/schemas/RecordRelationType'}
+        note: {type: string, maxLength: 300}
+
+    WithdrawRecordRelationRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 300, description: 철회 사유(공백만으로는 안 된다)}
+
+    CreateManualDraftRequest:
+      type: object
+      additionalProperties: false
+      required: [recordType, title, summary, originalExcerpt, occurredOn]
+      properties:
+        recordType: {$ref: '#/components/schemas/RecordType'}
+        title: {type: string, minLength: 1, maxLength: 200}
+        summary: {type: string, minLength: 1, maxLength: 4000}
+        originalExcerpt: {type: string, minLength: 1, maxLength: 10000}
+        occurredOn: {type: string, format: date}
+        ownerUserId: {type: integer, format: int64, minimum: 1, maximum: 9007199254740991, nullable: true}
+        dueOn: {type: string, format: date, nullable: true}
+
+    RegenerateHandoverRequest:
+      type: object
+      additionalProperties: false
+      required: [scopeFrom, scopeTo, scopeRecordTypes, includeNoteDerivedRecords]
+      properties:
+        scopeFrom: {type: string, format: date}
+        scopeTo: {type: string, format: date}
+        scopeRecordTypes:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/RecordType'}
+        includeNoteDerivedRecords: {type: boolean}

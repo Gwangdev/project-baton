@@ -1,0 +1,9 @@
+[Unit]
+Description=Project Baton: reset the public demo every day at 04:00 KST
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 Asia/Seoul
+Persistent=true
+
+[Install]
+WantedBy=timers.target

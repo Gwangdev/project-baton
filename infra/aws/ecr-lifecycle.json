@@ -1,0 +1,10 @@
+{
+  "rules": [
+    {
+      "rulePriority": 1,
+      "description": "Keep the five most recent images; the host runs one tag and may roll back to the previous ones",
+      "selection": { "tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 5 },
+      "action": { "type": "expire" }
+    }
+  ]
+}

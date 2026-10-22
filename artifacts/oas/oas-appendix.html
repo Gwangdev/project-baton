@@ -1,0 +1,78 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Appendix — 전체 API 명세</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Pretendard', -apple-system, 'Apple SD Gothic Neo', sans-serif; word-break: keep-all; background:#fff; }
+  :root { --navy:#0b1b33; --navy-soft:#162e52; --orange:#ff6b2c; --line:#d6dde6; --grey:#8a9bb3; --grey-dark:#5b6b80; }
+
+  /* 16:9 슬라이드에 폭을 맞춰 넣는 것을 전제로 폭을 고정한다. 이 폭에서
+     본문 12px 가 슬라이드 위에서 8pt 를 넘는다. */
+  .page { width: 1320px; padding: 32px 36px; background:#fff; }
+  h2 { margin: 0 0 3px; font-size: 22px; color: var(--navy); }
+  .lead { margin: 0 0 20px; font-size: 13px; color: var(--grey-dark); }
+
+  .grid { column-count: 3; column-gap: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 9px; overflow: hidden;
+          break-inside: avoid; margin-bottom: 12px; }
+  .card__h { display:flex; align-items:baseline; gap:7px; background:#fff8f4; border-bottom:1px solid var(--line); padding: 7px 11px; }
+  .card__t { font-family: ui-monospace, monospace; font-size: 13px; font-weight: 700; color: var(--orange); }
+  .card__n { font-size: 11px; color: var(--grey); margin-left:auto; }
+  .card__d { font-size: 11px; color: var(--grey-dark); }
+  .op { display: grid; grid-template-columns: 104px 1fr; gap: 8px; padding: 5px 11px; border-top: 1px solid #eef1f5; align-items: start; }
+  .op:first-of-type { border-top: none; }
+  .verbs { display:flex; flex-wrap:wrap; gap:3px; }
+  .verb { font-family: ui-monospace, monospace; font-size: 10px; font-weight:700; color:#fff; border-radius:3px; padding:1px 4px; line-height:1.5; }
+  .verb.GET { background: var(--grey-dark); }
+  .verb.POST { background: var(--orange); }
+  .verb.PATCH { background: var(--navy-soft); }
+  .verb.DELETE { background: #b3261e; }
+  .path { font-family: ui-monospace, monospace; font-size: 13px; color: var(--navy);
+          line-height:1.45; overflow-wrap: anywhere; }
+
+  .foot { margin-top: 16px; display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .note { border-left: 3px solid var(--navy); background:#f4f6f9; border-radius:0 7px 7px 0; padding: 9px 12px; }
+  .note b { display:block; font-size: 12px; color: var(--navy); }
+  .note span { font-size: 11px; color: var(--grey-dark); line-height:1.5; }
+</style>
+
+<section class="page" id="page">
+  <h2>Appendix — 전체 API 명세</h2>
+  <p class="lead" id="lead"></p>
+  <div class="grid" id="grid"></div>
+  <div class="foot" id="foot"></div>
+</section>
+
+<script src="./oas-data.js"></script>
+<script>
+  const d = window.__OAS
+  document.getElementById('lead').textContent =
+    `ProjectBaton-API.yml · 기능군 ${d.stats.tags}개 · 경로 ${d.stats.paths}개 · 오퍼레이션 ${d.stats.operations}개 · 스키마 ${d.stats.schemas}개`
+
+  // 같은 경로에 여러 메서드가 걸리므로 경로로 묶어 한 줄에 보인다.
+  const ORDER = { GET:0, POST:1, PUT:2, PATCH:3, DELETE:4 }
+  document.getElementById('grid').innerHTML = d.full.map((g) => {
+    const byPath = new Map()
+    g.ops.forEach((o) => {
+      if (!byPath.has(o.path)) byPath.set(o.path, [])
+      byPath.get(o.path).push(o.method)
+    })
+    const rows = [...byPath].map(([path, verbs]) => `
+      <div class="op">
+        <span class="verbs">${[...new Set(verbs)].sort((a,b)=>ORDER[a]-ORDER[b])
+          .map((v) => `<span class="verb ${v}">${v}</span>`).join('')}</span>
+        <span class="path">${path.replace('/api/v1','')}</span>
+      </div>`).join('')
+    return `<div class="card">
+      <div class="card__h"><span class="card__t">${g.tag}</span>
+        <span class="card__d">${g.desc}</span>
+        <span class="card__n">${g.ops.length}</span></div>
+      ${rows}</div>`
+  }).join('')
+
+  document.getElementById('foot').innerHTML = [
+    ['오류 응답', `application/problem+json · ${d.stats.errorCodes.join(' · ')}`],
+    ['비동기 접수', `202 Accepted ${d.stats.async}건 + Location 헤더`],
+    ['스키마 재사용', `$ref ${d.stats.refs}회 · 스키마 ${d.stats.schemas}개`],
+  ].map(([t, v]) => `<div class="note"><b>${t}</b><span>${v}</span></div>`).join('')
+</script>

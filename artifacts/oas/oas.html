@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>OAS 컴포넌트 맵</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Pretendard', -apple-system, 'Apple SD Gothic Neo', sans-serif; word-break: keep-all; }
+  :root { --navy:#0b1b33; --navy-soft:#162e52; --orange:#ff6b2c; --paper:#f4f6f9; --line:#d6dde6; --grey:#8a9bb3; --grey-dark:#5b6b80; }
+  /* 본문(11장)은 하늘색 배경 위에 얹히므로 투명 배경으로 뽑는다. */
+  #map { width: 1400px; padding: 40px; background: transparent; }
+  h2 { margin: 0 0 4px; font-size: 24px; color: var(--navy); }
+  .lead { margin: 0 0 22px; font-size: 14px; color: var(--grey-dark); }
+
+  .heads { display: grid; grid-template-columns: 260px 1fr 300px; gap: 14px; margin-bottom: 8px; }
+  .heads span { font-size: 12px; font-weight: 700; color: var(--orange); }
+
+  .row { display: grid; grid-template-columns: 260px 1fr 300px; gap: 14px; align-items: stretch; margin-bottom: 7px; }
+  .cell { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 9px 12px; display: flex; flex-direction: column; justify-content: center; }
+  .screen { font-size: 11px; font-weight: 700; color: var(--orange); }
+  .action { font-size: 13px; color: var(--navy); margin-top: 1px; }
+  .op { display: flex; align-items: center; gap: 8px; font-family: ui-monospace, monospace; font-size: 12px; }
+  .verb { font-weight: 700; padding: 1px 7px; border-radius: 4px; font-size: 11px; color: #fff; }
+  .verb.POST { background: var(--orange); }
+  .verb.PATCH { background: var(--navy-soft); }
+  .verb.GET { background: var(--grey-dark); }
+  .code { margin-left: auto; font-size: 11px; color: var(--grey); }
+  .schema { font-family: ui-monospace, monospace; font-size: 11px; color: var(--navy); line-height: 1.55; }
+  .schema em { color: var(--grey); font-style: normal; }
+
+  .groups { display: flex; flex-wrap: wrap; gap: 7px; margin: 22px 0 16px; }
+  .g { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 5px 12px; font-size: 12px; color: var(--grey-dark); }
+  .g b { color: var(--navy); font-family: ui-monospace, monospace; }
+  .g i { font-style: normal; color: var(--orange); font-weight: 700; }
+
+  .rules { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .rule { border: 1px solid var(--line); border-left: 3px solid var(--navy); border-radius: 8px; background: #fff; padding: 10px 12px; }
+  .rule__t { font-size: 12px; font-weight: 700; color: var(--navy); }
+  .rule__v { font-size: 11px; color: var(--orange); font-family: ui-monospace, monospace; margin: 2px 0 4px; }
+  .rule__d { font-size: 11px; color: var(--grey-dark); line-height: 1.5; }
+</style>
+
+<section id="map">
+  <h2>API 명세 — 화면의 행동 하나가 어디로 내려가는가</h2>
+  <p class="lead" id="lead"></p>
+
+  <div class="heads"><span>화면과 사용자 행동</span><span>Method · Path</span><span>요청 → 응답 스키마</span></div>
+  <div id="rows"></div>
+
+  <div class="groups" id="groups"></div>
+  <div class="rules" id="rules"></div>
+</section>
+
+<script src="./oas-data.js"></script>
+<script>
+  const d = window.__OAS
+  document.getElementById('lead').textContent =
+    `경로 ${d.stats.paths}개 · 오퍼레이션 ${d.stats.operations}개 · 스키마 ${d.stats.schemas}개. 시연 서사에 등장하는 행동만 뽑아 연결을 보인다.`
+
+  document.getElementById('rows').innerHTML = d.rows.map((r) => `
+    <div class="row">
+      <div class="cell"><span class="screen">${r.screen}</span><span class="action">${r.action}</span></div>
+      <div class="cell"><span class="op"><span class="verb ${r.method}">${r.method}</span>${r.path}<span class="code">${r.successCode}</span></span></div>
+      <div class="cell"><span class="schema">${r.request ? r.request : '<em>본문 없음</em>'} <em>→</em> ${r.response}</span></div>
+    </div>`).join('')
+
+  document.getElementById('groups').innerHTML = d.groups
+    .map((g) => `<span class="g"><b>${g.tag}</b> <i>${g.count}</i></span>`).join('')
+
+  const s = d.stats
+  document.getElementById('rules').innerHTML = [
+    ['오류 응답', 'application/problem+json', `${s.errorCodes.join(' · ')} — 화면이 오류를 같은 모양으로 읽는다`],
+    ['비동기 접수', `202 Accepted × ${s.async}`, '패키지 생성은 접수와 완료를 나눈다. 안 나누면 화면이 멈춘다'],
+    ['스키마 재사용', `$ref × ${s.refs}`, '같은 개체를 두 번 정의하면 한쪽만 고쳐져 ERD와 어긋난다'],
+    ['삭제는 오생성 취소만', `DELETE × ${s.deletes} · 참조 있으면 409`, '쓰인 대상은 PATCH isActive로 감춘다. 확인자를 지우면 근거가 끊긴다'],
+  ].map(([t, v, dd]) => `<div class="rule"><div class="rule__t">${t}</div><div class="rule__v">${v}</div><div class="rule__d">${dd}</div></div>`).join('')
+  window.__ready = true
+</script>

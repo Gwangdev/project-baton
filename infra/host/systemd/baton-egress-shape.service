@@ -1,0 +1,12 @@
+[Unit]
+Description=Project Baton: cap the host's outgoing traffic (work-orders D7, decision 4a)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/baton/infra/host/egress-shape.sh
+
+[Install]
+WantedBy=multi-user.target

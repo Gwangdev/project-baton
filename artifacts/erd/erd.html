@@ -1,0 +1,210 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Project Baton ERD</title>
+<style>
+  @font-face { font-family: 'Pretendard'; src: local('Pretendard'); }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Pretendard', -apple-system, 'Apple SD Gothic Neo', sans-serif; word-break: keep-all; }
+
+  /* 색은 tokens.css와 같은 값을 쓴다. 발표 슬라이드와 화면 캡처의 색이 어긋나면
+     같은 서비스로 보이지 않는다. */
+  :root {
+    --navy: #0b1b33; --navy-soft: #162e52; --orange: #ff6b2c;
+    --paper: #f4f6f9; --line: #d6dde6; --grey: #8a9bb3; --grey-dark: #5b6b80;
+  }
+
+  section { padding: 40px; }
+  /* 본문(10장)은 하늘색 배경 위에 얹히므로 투명하게 둔다. */
+  #summary { width: 1400px; background: transparent; }
+  /* Appendix(13장)는 흰색 페이지다. */
+  #full, #dblist { width: 1600px; background: #fff; }
+
+  h2 { margin: 0 0 4px; font-size: 24px; color: var(--navy); }
+  .lead { margin: 0 0 26px; font-size: 14px; color: var(--grey-dark); }
+
+  /* 본문용 약식 ERD — 그룹 상자를 좌표로 배치하고 SVG로 관계선을 얹는다.
+     자동 배치로는 「수집 → 확인 → 활용」이라는 읽는 순서가 만들어지지 않는다. */
+  .canvas { position: relative; width: 1400px; height: 730px; }
+  .wires { position: absolute; inset: 0; width: 1400px; height: 730px; }
+
+  .band {
+    position: absolute; left: 40px; width: 1320px;
+    border: 1px dashed var(--grey); border-radius: 10px; padding: 12px 18px;
+    background: rgba(255,255,255,.75); display: flex; align-items: baseline; gap: 14px;
+  }
+  .band__tag { font-size: 12px; font-weight: 700; color: var(--orange); white-space: nowrap; }
+  .band__tables { font-family: ui-monospace, monospace; font-size: 13px; color: var(--navy); }
+  .band__note { font-size: 12px; color: var(--grey-dark); margin-left: auto; }
+  .band__note b { font-family: ui-monospace, monospace; color: var(--navy); }
+
+  .node {
+    position: absolute; z-index: 1; border: 1px solid var(--line); border-radius: 12px;
+    background: #fff; padding: 14px 16px;
+  }
+  .node--core { border: 2px solid var(--navy); background: var(--navy); }
+  .node__tag { margin: 0 0 6px; font-size: 12px; font-weight: 700; color: var(--orange); }
+  .node__tables { margin: 0 0 8px; font-family: ui-monospace, monospace; font-size: 13px; color: var(--navy); line-height: 1.5; }
+  .node--core .node__tables { color: #fff; }
+  .node__desc { margin: 0; font-size: 12px; color: var(--grey-dark); line-height: 1.55; }
+  .node--core .node__desc { color: #cfd8e3; }
+
+  .states { display: flex; gap: 5px; margin: 0 0 10px; flex-wrap: wrap; }
+  .st { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #fff; color: var(--navy); }
+  .st--draft { background: #fff0e8; color: var(--orange); border: 1px solid var(--orange); }
+
+  .wire {
+    position: absolute; margin: 0; z-index: 2;
+    padding: 3px 7px; border-radius: 6px; background: rgba(255,255,255,.92);
+    font-size: 11px; color: var(--navy); line-height: 1.45; text-align: center;
+  }
+  .wire b { font-family: ui-monospace, monospace; font-size: 11px; }
+  .wire--sub { color: var(--grey-dark); }
+
+  .note { margin-top: 6px; font-size: 12px; color: var(--grey-dark); }
+  .note b { color: var(--navy); }
+  .note code { font-family: ui-monospace, monospace; }
+
+  /* ── Appendix ────────────────────────────────────── */
+  #full .mermaid { font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 18px; }
+  th { text-align: left; padding: 7px 9px; background: var(--paper); color: var(--grey-dark); border-bottom: 1px solid var(--line); }
+  td { padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  code { font-family: ui-monospace, monospace; font-size: 11px; }
+  h3 { margin: 18px 0 8px; font-size: 14px; color: var(--navy); }
+  .cols { columns: 2; column-gap: 30px; }
+  .cols > div { break-inside: avoid; }
+</style>
+
+<section id="summary">
+  <h2>데이터 흐름 — 기록이 들어와 확인되고, 인수인계로 쓰인다</h2>
+  <p class="lead"><span data-stat="tables"></span>개 테이블을 성격이 같은 것끼리 <span data-stat="groups"></span>개로 묶었다. 화살표는 그룹이 주고받는 대표 데이터다.</p>
+
+  <div class="canvas">
+    <svg class="wires" viewBox="0 0 1400 730" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#0b1b33" />
+        </marker>
+        <marker id="head-sub" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#8a9bb3" />
+        </marker>
+      </defs>
+      <path d="M283,285 H434" stroke="#0b1b33" stroke-width="2" fill="none" marker-end="url(#head)" />
+      <path d="M823,230 H974" stroke="#0b1b33" stroke-width="2" fill="none" marker-end="url(#head)" />
+      <path d="M1070,321 V364" stroke="#0b1b33" stroke-width="2" fill="none" marker-end="url(#head)" />
+      <path d="M1268,321 V364" stroke="#0b1b33" stroke-width="2" fill="none" marker-end="url(#head)" />
+      <path d="M600,423 V575 H1070 V522" stroke="#8a9bb3" stroke-width="1.6" fill="none"
+            stroke-dasharray="6 5" marker-end="url(#head-sub)" />
+      <path d="M660,423 V620 H1268 V522" stroke="#8a9bb3" stroke-width="1.6" fill="none"
+            stroke-dasharray="6 5" marker-end="url(#head-sub)" />
+    </svg>
+
+    <div class="band" style="top:30px;">
+      <span class="band__tag">1. 조직과 권한</span>
+      <span class="band__tables">organizations · users · credential_tokens · projects · project_members</span>
+      <span class="band__note">아래 모든 개체가 <b>project_id</b>로 이 경계 안에 놓인다. 사용자는 배정된 프로젝트의 기록만 본다</span>
+    </div>
+
+    <div class="node" style="left:40px; top:200px; width:240px;">
+      <p class="node__tag">2. 기록 수집</p>
+      <p class="node__tables">source_connections<br />record_sources</p>
+      <p class="node__desc">승인 클라우드 폴더 · 메일 · 결재 · 메신저 · 회의록의 연결 설정과 수집 문서</p>
+    </div>
+
+    <div class="node node--core" style="left:440px; top:170px; width:380px; height:250px;">
+      <p class="node__tag">3. 프로젝트 기록</p>
+      <p class="node__tables">work_records · record_relations<br />record_revisions · personal_notes</p>
+      <div class="states">
+        <span class="st st--draft">AUTO_DRAFT</span><span class="st">CONFIRMED</span>
+        <span class="st">CORRECTED</span><span class="st">DISMISSED</span>
+      </div>
+      <p class="node__desc">AI 초안은 사람이 확인해야 신뢰 기록이 된다.<br />빠른 메모 원본은 비공개로 남고 선택 요약만 기록이 된다</p>
+    </div>
+
+    <div class="node" style="left:980px; top:170px; width:380px;">
+      <p class="node__tag">4. 담당자 교체와 인수인계</p>
+      <p class="node__tables">handovers · handover_items · scope_types<br />generations · snapshot_records<br />item_conflicts · item_acknowledgements</p>
+      <p class="node__desc">확인된 기록만 패키지 항목의 근거가 된다. 생성 회차마다 근거를 고정하고, 충돌은 관리자가 고른 근거를 남긴다</p>
+    </div>
+
+    <div class="node" style="left:980px; top:370px; width:182px; height:150px;">
+      <p class="node__tag">5. 근거 기반 질의응답</p>
+      <p class="node__tables">qa_messages<br />qa_citations<br />record_embeddings</p>
+      <p class="node__desc">답변마다 인용 기록과 그때의 신뢰 상태. 검색용 임베딩</p>
+    </div>
+
+    <div class="node" style="left:1178px; top:370px; width:182px; height:150px;">
+      <p class="node__tag">6. 업무 준비도 확인</p>
+      <p class="node__tables">assessments · questions<br />attempts · answers</p>
+      <p class="node__desc">오답 문항이 다시 확인할 기록을 가리킨다</p>
+    </div>
+
+    <p class="wire" style="left:286px; top:246px; width:146px;">
+      <b>record_source_id</b><br />수집 문서에서 만든 기록 후보
+    </p>
+    <p class="wire" style="left:826px; top:191px; width:146px;">
+      <b>work_record_id</b><br />확인된 기록만 포함
+    </p>
+    <p class="wire" style="left:978px; top:327px; width:86px;"><b>handover_id</b></p>
+    <p class="wire" style="left:1176px; top:327px; width:86px;"><b>handover_id</b></p>
+    <p class="wire wire--sub" style="left:614px; top:559px; width:330px;">
+      <b>qa_citations.work_record_id</b><br />답변이 인용한 근거 기록
+    </p>
+    <p class="wire wire--sub" style="left:674px; top:604px; width:420px;">
+      <b>assessment_questions.linked_record_id</b><br />오답일 때 다시 볼 기록
+    </p>
+
+    <div class="band" style="top:665px;">
+      <span class="band__tag">7. 운영 기반</span>
+      <span class="band__tables">jobs · idempotency_requests · audit_events · spring_session(_attributes)</span>
+      <span class="band__note">모든 그룹이 쓰는 작업 큐·재전송 방지·감사·세션. 업무 데이터의 흐름에는 끼지 않는다</span>
+    </div>
+  </div>
+
+  <p class="note"><b>설계 판단</b> · 대체 여부를 신뢰 상태에 넣지 않고 <code>record_relations</code>로 뺐다. 상태에 넣으면 「오래되어 못 믿는 기록」과 「후속 결정으로 대체된 기록」이 한 값에 섞여 화면에서 이유를 구분할 수 없다.</p>
+</section>
+
+<section id="full">
+  <h2>전체 데이터 모델 — <span data-stat="tables"></span>개 테이블</h2>
+  <p class="lead">ProjectBaton-DB.dbml에서 생성. 실선은 필수 외래키, 점선은 선택 외래키다.</p>
+  <pre class="mermaid" id="mmd"></pre>
+</section>
+
+<section id="dblist">
+  <h2>도메인별 테이블 목록</h2>
+  <p class="lead"><span data-stat="groups"></span>개 도메인 그룹 · 테이블 <span data-stat="tables"></span>개 · enum <span data-stat="enums"></span>개</p>
+  <div id="dbtables"></div>
+</section>
+
+<script src="./erd-data.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'
+  for (const el of document.querySelectorAll('[data-stat]')) el.textContent = window.__STATS[el.dataset.stat]
+  document.getElementById('mmd').textContent = window.__MMD
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'base',
+    fontFamily: "Pretendard, -apple-system, sans-serif",
+    themeVariables: {
+      primaryColor: '#ffffff', primaryTextColor: '#0b1b33', primaryBorderColor: '#0b1b33',
+      lineColor: '#5b6b80', tertiaryColor: '#f4f6f9',
+    },
+    er: { entityPadding: 10, fontSize: 12 },
+  })
+  await mermaid.run({ nodes: [document.getElementById('mmd')] })
+
+  // 도메인별 테이블 목록도 같은 원본에서 그린다.
+  const host = document.getElementById('dbtables')
+  host.innerHTML = window.__GROUPS.map((g) => `
+    <div>
+      <h3>${g.name}</h3>
+      <table>
+        <thead><tr><th style="width:190px">테이블</th><th>역할</th><th style="width:280px">주요 컬럼</th></tr></thead>
+        <tbody>${g.tables.map((t) => `
+          <tr><td><code>${t.name}</code></td><td>${t.role}</td>
+          <td>${t.cols.map((c) => `<code>${c}</code>`).join(' · ')}</td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`).join('')
+  window.__mermaidDone = true
+</script>

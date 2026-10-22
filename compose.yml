@@ -1,0 +1,189 @@
+# Project Baton의 단일 호스트 배포(README §8).
+# - 포트를 여는 것은 프록시뿐이다. DB는 밖으로 가는 경로가 없는 내부 네트워크에 있고, API는 거기서 DB에 닿고 edge
+# 네트워크에서 프록시에 닿는다.
+# - 모든 서비스가 고정된 root가 아닌 사용자로, 읽기 전용 루트 파일 시스템에서 돈다. 쓸 수 있는 경로는 하나씩 나열한다.
+# - 비밀값과 인증서 폴더는 환경에서 오고 이 파일에는 쓰지 않는다.
+#  필수: BATON_DB_PASSWORD, BATON_TLS_DIR(cert.pem과 key.pem이 든 폴더).
+#  backup 프로필이면 BATON_BACKUP_DIR과 BATON_BACKUP_RECIPIENTS도(backup 서비스 참고).
+name: project-baton
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    # 이미지의 postgres 계정(999:999, 이미지에서 `id postgres`로 확인). 데이터 volume을 소유하고 socket 폴더와 /tmp에
+    # 쓸 수 있어야 하며, entrypoint는 그 밖에 아무것도 쓰지 않는다.
+    user: "999:999"
+    read_only: true
+    tmpfs:
+      - /var/run/postgresql:uid=999,gid=999,mode=2775
+      - /tmp:uid=999,gid=999
+    environment:
+      POSTGRES_DB: baton
+      POSTGRES_USER: baton
+      POSTGRES_PASSWORD: ${BATON_DB_PASSWORD:?BATON_DB_PASSWORD is required}
+    command: ["postgres", "-c", "shared_buffers=512MB", "-c", "effective_cache_size=1536MB"]
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - data
+    healthcheck:
+      # 새 volume을 초기화하는 동안(infra/db/init) Postgres는 socket에서만 임시 서버를 돌려서, socket으로 확인하면
+      # 실제 서버가 받기 전에 준비됐다고 판단해 첫 마이그레이션이 실패한다. 그래서 socket이 아니라 TCP로 확인한다.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "baton", "-d", "baton"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    cpus: 2
+    mem_limit: 2g
+    logging: *logging
+
+  app:
+    build:
+      context: ./backend
+      # 이미지 빌드(backend/Dockerfile)에 줄 읽기 전용 Gradle 의존성 캐시. Maven Central 없이 빌드하려면
+      # BATON_GRADLE_RO_CACHE를 이 기계의 ~/.gradle/caches로 둔다. 기본 폴더에는 캐시가 없다.
+      additional_contexts:
+        gradle-ro-cache: ${BATON_GRADLE_RO_CACHE:-./infra/build/no-gradle-cache}
+    image: project-baton/app:local
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001
+    environment:
+      BATON_DB_URL: jdbc:postgresql://db:5432/baton
+      BATON_DB_USERNAME: baton
+      BATON_DB_PASSWORD: ${BATON_DB_PASSWORD:?BATON_DB_PASSWORD is required}
+      # AI(README §7): 기본은 stub. BATON_AI_PROFILE=local|provider와 BATON_AI_PROVIDER = openai, google-genai,
+      # ollama(또는 채팅과 임베딩 모델을 따로)로 실제 모델을 켠다. 키는 운영자의 셸이나 저장소 밖에 둔
+      # --env-file(~/baton-secrets/ai.env)에서 오고 여기에는 쓰지 않는다. Compose 스택은 호스트의 Ollama에
+      # host.docker.internal로 닿는다.
+      BATON_AI_PROFILE: ${BATON_AI_PROFILE:-stub}
+      BATON_AI_CHAT_PROVIDER: ${BATON_AI_CHAT_PROVIDER:-${BATON_AI_PROVIDER:-none}}
+      BATON_AI_EMBEDDING_PROVIDER: ${BATON_AI_EMBEDDING_PROVIDER:-${BATON_AI_PROVIDER:-none}}
+      BATON_AI_CHAT_MODEL_ID: ${BATON_AI_CHAT_MODEL_ID:-}
+      BATON_AI_EMBEDDING_MODEL_ID: ${BATON_AI_EMBEDDING_MODEL_ID:-}
+      BATON_OLLAMA_BASE_URL: ${BATON_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      BATON_AI_EXTERNAL_TRANSMISSION: ${BATON_AI_EXTERNAL_TRANSMISSION:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      BATON_SESSION_COOKIE_SECURE: "true"
+      # 빈 DB의 첫 시스템 관리자(identity/AdminBootstrap). 첫 기동에는 다섯 개를 모두 주고, 활성 관리자가 생기면
+      # 무시한다. 그 밖에는 설정하지 않는다.
+      BATON_BOOTSTRAP_ADMIN_EMPLOYEE_NO: ${BATON_BOOTSTRAP_ADMIN_EMPLOYEE_NO:-}
+      BATON_BOOTSTRAP_ADMIN_PASSWORD: ${BATON_BOOTSTRAP_ADMIN_PASSWORD:-}
+      BATON_BOOTSTRAP_ADMIN_NAME: ${BATON_BOOTSTRAP_ADMIN_NAME:-}
+      BATON_BOOTSTRAP_ADMIN_EMAIL: ${BATON_BOOTSTRAP_ADMIN_EMAIL:-}
+      BATON_BOOTSTRAP_ADMIN_ORGANIZATION: ${BATON_BOOTSTRAP_ADMIN_ORGANIZATION:-}
+      BATON_BOOTSTRAP_ADMIN_RESET: ${BATON_BOOTSTRAP_ADMIN_RESET:-false}
+      # README §4.2는 업무일을 Asia/Seoul로 센다. JDBC 드라이버가 JVM 시간대를 DB 세션에 넘겨서 current_date로 하는
+      # 배정 확인이 이 값을 따른다. 저장하는 시각은 timestamptz(UTC)로 둔다.
+      TZ: Asia/Seoul
+    depends_on:
+      db:
+        condition: service_healthy
+    # 작업 slot은 종료할 때 실행 중인 작업에 25초를 주는데(config/JobSlotConfiguration), Docker 기본값 10초면 그 전에
+    # 프로세스를 죽인다.
+    stop_grace_period: 30s
+    networks:
+      - data
+      - edge
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8081/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 120s
+    cpus: 2
+    mem_limit: 2g
+    logging: *logging
+
+  proxy:
+    build:
+      context: .
+      dockerfile: infra/proxy/Dockerfile
+    image: project-baton/proxy:local
+    user: "10002:10002"
+    read_only: true
+    tmpfs:
+      - /data:uid=10002,gid=10002
+      - /config:uid=10002,gid=10002
+    ports:
+      - "${BATON_PROXY_BIND:-127.0.0.1}:${BATON_PROXY_PORT:-8443}:8443"
+    volumes:
+      - type: bind
+        source: ${BATON_TLS_DIR:-./infra/proxy/tls}
+        target: /etc/baton/tls
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8079/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    cpus: 1
+    mem_limit: 256m
+    logging: *logging
+
+  backup:
+    # 야간 암호화 백업(가정 A-06/A-07). 설정하지 않은 스택에는 없는 호스트 경로 두 개가 필요해서 backup 프로필을 켜지
+    # 않으면 꺼져 있다(COMPOSE_PROFILES=backup 또는 --profile backup):
+    #   BATON_BACKUP_DIR         백업이 가는 폴더. 운영에서는 이 호스트와 다른 장애 영역인 NAS mount
+    #   BATON_BACKUP_RECIPIENTS  age 공개키(age1...) 파일. 개인키는 운영자가 가지고 여기에는 두지 않는다
+    # 폴더는 uid 999가 쓸 수 있어야 한다. 덤프는 쓰면서 암호화되어 평문으로 디스크에 닿지 않는다.
+    profiles: ["backup"]
+    build:
+      context: ./infra/backup
+    image: project-baton/backup:local
+    user: "999:999"
+    read_only: true
+    tmpfs:
+      - /tmp:uid=999,gid=999
+    environment:
+      PGHOST: db
+      PGUSER: baton
+      PGDATABASE: baton
+      PGPASSWORD: ${BATON_DB_PASSWORD:?BATON_DB_PASSWORD is required}
+      BATON_BACKUP_AT: ${BATON_BACKUP_AT:-02:00}
+      BATON_BACKUP_KEEP_DAILY: ${BATON_BACKUP_KEEP_DAILY:-30}
+      BATON_BACKUP_KEEP_MONTHLY: ${BATON_BACKUP_KEEP_MONTHLY:-12}
+      TZ: Asia/Seoul
+    volumes:
+      - type: bind
+        source: ${BATON_BACKUP_DIR:-./infra/backup/unset}
+        target: /backups
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BATON_BACKUP_RECIPIENTS:-./infra/backup/unset}
+        target: /etc/baton/backup/recipients
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - data
+    cpus: 1
+    mem_limit: 512m
+    logging: *logging
+
+networks:
+  data:
+    internal: true
+  edge: {}
+
+volumes:
+  db-data: {}

@@ -1,0 +1,23 @@
+# 공개 배포 프록시(work-orders D7). 사이트 주소는 공개 이름(BATON_SITE_ADDRESS, baton.gwang.dev)이다. Caddy가 Let's
+# Encrypt에서 인증서를 받아 만료 전에 갱신하고, HTTP에는 HTTPS로 redirect로 답하고, 인증서를 named volume인 /data에
+# 둔다. 발급자가 한 이름의 발급 횟수를 제한해서, volume에 두면 재시작해도 새 인증서를 요청하지 않는다. 이름의 DNS
+# 레코드가 이 호스트를 바로 가리켜야 한다(Cloudflare "DNS only"). 그렇지 않으면 발급자가 닿지 못하고 브라우저의 TLS가
+# Cloudflare에서 끝난다. 컨테이너가 80과 443을 직접 받고, Docker는 컨테이너 안에서 권한 없는 프로세스가 그 포트를 쓰게
+# 해 준다.
+{
+	admin off
+	persist_config off
+}
+
+{$BATON_SITE_ADDRESS} {
+	import /etc/caddy/routes.caddy
+
+	# 매일 초기화(infra/demo/reset.sh)나 재시작으로 API가 내려가 있는 동안, 방문자는 맨 502 대신 짧은 안내를 받는다.
+	handle_errors 502 503 504 {
+		header Content-Type "text/plain; charset=utf-8"
+		header Retry-After 120
+		respond "데모 데이터를 초기화하거나 서버를 다시 시작하는 중입니다. 잠시 뒤 다시 열어 주십시오." 503
+	}
+}
+
+import /etc/caddy/health.caddy

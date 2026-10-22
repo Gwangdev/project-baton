@@ -1,0 +1,20 @@
+# 관측 overlay(compose.observe.yml)의 scrape 대상. 10초 간격이면 1분 window에 표본이 여섯이라 부하 실행에서 찾은 짧은
+# 정체를 볼 수 있고, 비용은 로컬 스택이 느끼지 못할 정도다.
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: app
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["app:8081"]
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:9090"]

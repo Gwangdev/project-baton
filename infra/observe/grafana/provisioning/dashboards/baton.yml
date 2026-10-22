@@ -1,0 +1,11 @@
+# 대시보드는 저장소의 파일이다(infra/observe/grafana/dashboards). Grafana 화면에서 고친 것은 남지 않으므로 변경은
+# 파일에 한다.
+apiVersion: 1
+providers:
+  - name: baton
+    folder: Baton
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards

@@ -1,0 +1,13 @@
+{
+  "full": [
+    { "name": "warmup", "until": 5, "rate": 30 },
+    { "name": "p30", "until": 20, "rate": 30 },
+    { "name": "p60", "until": 35, "rate": 60 },
+    { "name": "soak", "until": 95, "rate": 30 }
+  ],
+  "short": [
+    { "name": "warmup", "until": 5, "rate": 30 },
+    { "name": "p30", "until": 10, "rate": 30 },
+    { "name": "p60", "until": 25, "rate": 60 }
+  ]
+}

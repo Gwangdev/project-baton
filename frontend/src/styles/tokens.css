@@ -1,0 +1,31 @@
+/*
+ * 시각 토큰.
+ *
+ * 발표 슬라이드와 시연 화면의 색을 맞추기 위해 초안 덱과 같은 팔레트를 쓴다.
+ * 기록 신뢰 상태에 색 규칙을 걸어 두어, 확정된 기록과 미확정 기록이
+ * 화면 어디에서나 같은 색으로 읽힌다.
+ *
+ * 시각 방향이 바뀌면 이 파일의 값만 바꾼다. 컴포넌트에는 색을 직접 쓰지 않는다.
+ */
+:root {
+  --navy: #0b1b33;
+  --navy-soft: #162e52;
+  --orange: #ff6b2c;
+  /* 되돌릴 수 없는 동작에만 쓴다. 주황은 상태 표시가 이미 쓰고 있다. */
+  --danger: #b3261e;
+  --paper: #f4f6f9;
+  --white: #ffffff;
+  --line: #d6dde6;
+  --grey: #8a9bb3;
+  --grey-dark: #5b6b80;
+
+  /* 기록 신뢰 상태 — DAY1 §2.3의 네 값에 대응한다 */
+  --status-auto-draft: var(--orange);
+  --status-confirmed: var(--navy);
+  --status-corrected: var(--navy-soft);
+  --status-dismissed: var(--grey);
+
+  --radius: 10px;
+  --gap: 16px;
+  --font: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif;
+}

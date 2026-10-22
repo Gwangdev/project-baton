@@ -1,0 +1,827 @@
+// Project Baton — 데이터 모델
+// 원광식 / 2026-09-08
+//
+// 범위: DAY1_서비스_기획_확정안.md의 FR-01~FR-22와 화면 S01~S12가 실제로 표시·입력하는 데이터
+// 기준: 화면별_표시필드표.md, DEMO_SCENARIO.md, 기획 판정 D1~D12
+// 배포 전제가 기업별 독립 구축형 Single Tenant이므로 tenant_id는 두지 않는다.
+
+Project project_baton {
+  database_type: 'PostgreSQL'
+  Note: '''
+  사내 프로젝트 인수인계 서비스. AI 초안은 사람이 확인한 뒤에만 인수인계 근거가 된다.
+
+  삭제 정책 — 이 모델의 모든 외래키는 삭제 동작을 지정하지 않는다.
+  PostgreSQL 기본값이 NO ACTION이므로 참조가 남아 있으면 DB가 삭제를 거부한다.
+  이것이 의도한 동작이다. CONFIRMED 기록의 확인자를 지우면 그 기록이 왜 믿을 만한지
+  설명할 수 없게 되고, 인수인계 패키지의 근거 인용도 함께 끊긴다.
+
+  관리자 화면의 삭제는 아무도 참조하지 않는 오생성 개체만 지운다.
+  참조가 하나라도 있으면 API가 409로 거부하고 무엇이 막는지 알려준다.
+  이미 업무에 쓰인 대상은 is_active를 내려 목록에서 감춘다.
+  '''
+}
+
+// ─────────────────────────────────────────────
+// enum
+// ─────────────────────────────────────────────
+
+// D1 — 담당자·기한은 유형이 아니라 work_records의 속성으로 분리했다.
+enum record_type {
+  SCHEDULE        [note: '일정']
+  CHANGE_DECISION [note: '변경 결정']
+  COMMITMENT      [note: '고객 약속']
+  BLOCKER         [note: '장애요인']
+  SCOPE_EXCEPTION [note: '범위 예외']
+  OPEN_ISSUE      [note: '미해결 결정']
+}
+
+// D12 — 네 값만 사용한다. 대체 여부는 상태가 아니라 SUPERSEDES 관계로 표현한다.
+enum record_trust_status {
+  AUTO_DRAFT [note: 'AI 생성, 사용자 미확인. 패키지에서 제외하거나 미확정으로 표시']
+  CONFIRMED  [note: '사용자가 원문과 대조해 확인']
+  CORRECTED  [note: '사용자가 수정하여 확정. record_revisions에 이력이 남는다']
+  DISMISSED  [note: '부정확하거나 불필요하여 제외']
+}
+
+// D2 — SUPERSEDES와 REFERENCES는 방향성, CONFLICTS_WITH는 대칭이다.
+// 대칭 관계는 (from, to)와 (to, from)을 중복 저장하지 않고 한 행만 둔다.
+enum record_relation_type {
+  SUPERSEDES     [note: 'from이 to를 대체한다. 방향성. 예: REC-102가 REC-101을 대체']
+  REFERENCES     [note: 'from이 to를 근거로 참조한다. 방향성']
+  CONFLICTS_WITH [note: '두 기록의 내용이 상충한다. 대칭']
+}
+
+// D7 — 개인 PC 감시나 데스크톱 에이전트는 사용하지 않는다.
+// 회사가 승인한 클라우드 업무 폴더를 사용자가 프로젝트에 명시적으로 연결한다.
+enum source_channel {
+  EMAIL
+  APPROVAL
+  MESSENGER
+  MEETING_MINUTES
+  CLOUD_PROJECT_FOLDER [note: '사용자가 연결한 승인 클라우드 업무 폴더']
+}
+
+// D11 — 시스템 관리자가 연동을 일시 중지·재개·해제한다. 영구 삭제는 기본 동작이 아니다.
+enum connection_status {
+  ACTIVE
+  PAUSED
+  DISCONNECTED
+}
+
+enum source_health {
+  NORMAL
+  DELAYED
+  FAILED
+}
+
+// source_connections.last_status가 사용한다. 수집 이력 테이블은 두지 않는다.
+enum ingestion_status {
+  SUCCEEDED
+  DELAYED
+  FAILED
+}
+
+enum system_role {
+  USER
+  SYSTEM_ADMIN
+}
+
+enum project_role {
+  OUTGOING_OWNER  [note: '기존 담당자']
+  INCOMING_OWNER  [note: '신규 담당자']
+  PROJECT_MANAGER [note: 'PM·PL·상급자']
+  MEMBER
+}
+
+enum project_status {
+  PLANNED
+  ON_TRACK
+  AT_RISK
+  CLOSED
+}
+
+enum handover_status {
+  REQUESTED        [note: '교체 요청 접수']
+  GENERATING       [note: '패키지 비동기 생성 중']
+  READY            [note: '신규 담당자 열람 가능']
+  REVIEW_REQUESTED [note: '관리자가 보완을 요청함']
+  COMPLETED        [note: '관리자 완료 승인']
+  FAILED           [note: '생성 실패. failure_reason에 사유가 남는다']
+}
+
+enum handover_item_kind {
+  OVERVIEW
+  KEY_DECISION
+  CHANGE
+  COMMITMENT
+  OPEN_RISK
+  SCHEDULE
+  FOLLOW_UP [note: '신규 담당자에게 넘긴 후속 작업. assignee_id와 due_on을 갖는다']
+}
+
+enum qa_role {
+  USER
+  ASSISTANT
+}
+
+enum qa_answer_status {
+  ANSWERED    [note: '근거 기록으로 답변. qa_citations에 인용이 남는다']
+  NO_EVIDENCE [note: '근거 부족. 추측하지 않고 추가 확인 대상을 표시']
+  FAILED      [note: 'AI 처리 실패. 일반 기록 조회는 유지된다']
+}
+
+enum assessment_status {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+}
+
+enum question_type {
+  MULTIPLE_CHOICE
+  SHORT_ANSWER
+}
+
+// ─────────────────────────────────────────────
+// 조직과 사용자
+// ─────────────────────────────────────────────
+
+Table organizations {
+  id         bigint       [pk, increment]
+  name       varchar(120) [not null, unique]
+  is_active  boolean      [not null, default: true, note: 'D11 — 영구 삭제 대신 비활성화']
+  created_at timestamptz  [not null, default: `now()`]
+  version    bigint       [not null, default: 0]
+
+  Note: 'FR-18의 조직 관리 대상. S12에 조직명과 소속 사용자 수를 표시한다.'
+}
+
+Table users {
+  id              bigint       [pk, increment]
+  organization_id bigint       [not null, ref: > organizations.id]
+  employee_no     varchar(32)  [not null, unique, note: '사내 계정 ID. S01 로그인 입력값']
+  name            varchar(60)  [not null]
+  title           varchar(40)  [not null, note: '책임·PL·매니저 등 직급. 전 화면 상단에 표시']
+  email           varchar(160) [not null, unique]
+  system_role     system_role  [not null, default: 'USER']
+  credential_hash varchar(255) [null, note: 'LOCAL 계정의 adaptive password hash; OIDC 계정은 null']
+  auth_provider   varchar(16)  [not null, default: 'LOCAL', note: 'LOCAL 또는 OIDC']
+  external_subject varchar(255) [null]
+  external_issuer varchar(500) [null]
+  last_signed_in_at timestamptz [null, note: '마지막 로그인 시각']
+  is_active       boolean      [not null, default: true, note: 'D11 — 영구 삭제 대신 비활성화']
+  created_at      timestamptz  [not null, default: `now()`]
+  version         bigint       [not null, default: 0]
+
+  Indexes {
+    organization_id
+  }
+
+  Note: '''
+  1단계는 사내 계정을 이 테이블에서 직접 검증한다.
+  2단계에서는 사내 SSO에 위임하고 credential_hash를 두지 않는다.
+  '''
+}
+
+Table credential_tokens {
+  id         bigint      [pk, increment]
+  user_id    bigint      [not null, ref: > users.id, note: '사용자와 함께 지워진다(ON DELETE CASCADE)']
+  token_hash char(64)    [not null, unique, note: '설정 코드의 SHA-256. 평문은 저장하지 않는다']
+  expires_at timestamptz [not null]
+  used_at    timestamptz [null]
+  created_by bigint      [null, ref: > users.id, note: '발급한 관리자. 관리자가 지워지면 null']
+  created_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    user_id [unique, note: 'V16: partial, WHERE used_at IS NULL — 사용자마다 쓰지 않은 코드는 하나']
+  }
+
+  Note: '관리자가 만든 로컬 계정의 일회용 초기 설정 코드(README §4.1)'
+}
+
+Table projects {
+  id                 bigint         [pk, increment]
+  code               varchar(32)    [not null, unique, note: '예: PJT-2026-014']
+  name               varchar(200)   [not null]
+  delivering_company varchar(120)   [not null, note: '수행사']
+  client_company     varchar(120)   [not null, note: '고객사']
+  started_on         date           [not null]
+  ends_on            date           [not null]
+  phase              varchar(60)    [not null, note: '예: 통합 테스트 준비']
+  status             project_status [not null, note: '수행 상태. 관리자 비활성화와 구분한다']
+  is_active          boolean        [not null, default: true, note: 'D11 — 관리자 비활성화 여부']
+  created_at         timestamptz    [not null, default: `now()`]
+  version            bigint         [not null, default: 0]
+
+  Indexes {
+    (id, code) [unique, note: 'V1']
+  }
+}
+
+// FR-01·FR-09의 접근 통제 단위. 한 사용자가 한 프로젝트에서 두 역할을 겸하지 않는다.
+Table project_members {
+  id           bigint       [pk, increment]
+  project_id   bigint       [not null, ref: > projects.id]
+  user_id      bigint       [not null, ref: > users.id]
+  project_role project_role [not null]
+  joined_on    date         [not null]
+  left_on      date         [null, note: '담당자 교체 완료 시 기존 담당자에게 설정된다']
+  version      bigint       [not null, default: 0]
+
+  Indexes {
+    (project_id, user_id) [unique]
+    (user_id, project_id)
+  }
+}
+
+// ─────────────────────────────────────────────
+// 연동 설정과 수집
+// ─────────────────────────────────────────────
+
+// D7·D11 — 연동 설정을 개별 문서 출처와 분리한다.
+// owner_user_id가 null이면 시스템 관리자가 만든 프로젝트 공용 연동(메일·결재·메신저·회의록)이고,
+// 값이 있으면 그 사용자가 연결한 개인 클라우드 업무 폴더다.
+Table source_connections {
+  id                bigint           [pk, increment]
+  project_id        bigint           [not null, ref: > projects.id]
+  owner_user_id     bigint           [null, ref: > users.id, note: 'D9 — 개인 연결의 원본과 미확정 후보는 이 사용자만 열람한다']
+  channel           source_channel   [not null]
+  display_name      varchar(200)     [not null, note: 'S06·S12에 보이는 연동 이름']
+  external_ref      varchar(300)     [null, note: '연결 대상 위치. 승인 클라우드 폴더 경로 등']
+  status            connection_status [not null, default: 'ACTIVE']
+  health            source_health    [not null, default: 'NORMAL', note: 'S02·S06·S12 연동 상태']
+  last_collected_at timestamptz      [null]
+  last_status       ingestion_status [null, note: 'FR-19 — 마지막 수집 실행 결과']
+  last_collected_count integer       [not null, default: 0, note: '마지막 실행의 수집 건수']
+  last_failed_count integer          [not null, default: 0, note: '마지막 실행의 실패 건수']
+  last_message      varchar(500)     [null, note: '실패 또는 지연 사유']
+  created_at        timestamptz      [not null, default: `now()`]
+  connector_kind     varchar(32)     [not null, default: 'FIXTURE']
+  checkpoint         text            [null]
+  version            bigint          [not null, default: 0]
+
+  Indexes {
+    (project_id, channel)
+    owner_user_id
+    (project_id, id) [unique, note: 'target of record_sources (project_id, source_connection_id)']
+  }
+
+  Note: 'FR-22 — 일반 사용자는 참여 프로젝트의 연동만, 시스템 관리자는 전체를 조회한다.'
+}
+
+// 수집된 개별 문서·메시지·파일의 원문 위치다. 연동 설정이 아니다.
+Table record_sources {
+  id                   bigint       [pk, increment]
+  source_connection_id bigint       [not null, ref: > source_connections.id]
+  display_name         varchar(200) [not null, note: '화면에 보이는 문서명. 예: 변경승인 결재문서']
+  external_ref         varchar(300) [null, note: '원문 위치. 외부 시스템의 식별자나 URL']
+  collected_at         timestamptz  [not null]
+  project_id           bigint       [not null, ref: > projects.id]
+  external_document_id varchar(300) [not null]
+  external_version     varchar(128) [not null]
+  content_hash         char(64)     [not null]
+  source_body          text         [not null, note: '권한 있는 원문 검토자만 접근하며 RAG에 넣지 않는다']
+  processing_status    varchar(20)  [not null, default: 'PENDING']
+  failure_code         varchar(60)  [null]
+  source_author_name   varchar(120) [null]
+  source_occurred_on   date         [null, note: 'V4: occurrence date reported by the source system']
+
+  Indexes {
+    (source_connection_id, collected_at)
+    (source_connection_id, external_document_id, external_version) [unique]
+    (project_id, id) [unique]
+  }
+}
+
+// ─────────────────────────────────────────────
+// 개인 메모와 프로젝트 기록
+// ─────────────────────────────────────────────
+
+// D10·D12 — 원본은 작성자 전용이며 공유해도 공개 상태가 바뀌지 않는다.
+// 공유 여부는 이 행을 참조하는 work_records.source_note_id의 존재로 판정한다.
+Table personal_notes {
+  id         bigint      [pk, increment]
+  code       varchar(32) [not null, unique, note: '화면이 참조하는 식별자. 예: NOTE-001']
+  project_id bigint      [not null, ref: > projects.id]
+  author_id  bigint      [not null, ref: > users.id]
+  body       text        [not null, note: '통화 전문 등 원본. 어떤 경우에도 프로젝트에 노출하지 않는다']
+  created_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (project_id, author_id, id) [note: '작성자별 메모 목록 정렬']
+    (project_id, id) [unique]
+  }
+}
+
+Table work_records {
+  id               bigint             [pk, increment]
+  code             varchar(32)        [not null, unique, note: '화면·문항이 참조하는 식별자. 예: REC-102']
+  project_id       bigint             [not null, ref: > projects.id]
+  record_source_id bigint             [null, note: '수집 문서에서 만든 기록']
+  source_note_id   bigint             [null, note: 'D10 — 빠른 메모의 선택 요약을 공유해 만든 기록']
+  record_type      record_type        [not null]
+  title            varchar(200)       [not null]
+  summary          text               [not null, note: 'AI 추출 요약. 메모 파생 기록에서는 사용자가 고른 요약']
+  original_excerpt text               [not null, note: 'S05 좌측 표시용. 메모 파생 기록에는 공유 요약만 담고 비공개 원문은 담지 않는다']
+  occurred_on      date               [not null]
+  author_id        bigint             [null, ref: > users.id, note: '내부 사용자로 식별된 원문 작성자']
+  author_name      varchar(120)       [not null, note: '외부 작성자를 포함한 당시 표시 이름']
+  owner_user_id    bigint             [null, ref: > users.id, note: 'D1 — 유형이 아니라 속성으로 분리한 담당자']
+  due_on           date               [null, note: 'D1 — 속성으로 분리한 기한']
+  trust_status     record_trust_status [not null, default: 'AUTO_DRAFT']
+  confirmed_by     bigint             [null, ref: > users.id]
+  confirmed_at     timestamptz        [null]
+  created_at       timestamptz        [not null, default: `now()`]
+  updated_at       timestamptz        [not null, default: `now()`]
+  version          bigint             [not null, default: 0]
+  source_version   varchar(128)       [null]
+  extraction_index integer            [not null, default: 0]
+  search_text      text               [not null, note: '공유 가능한 확정 요약으로만 구성']
+
+  Indexes {
+    (project_id, occurred_on, id) [note: '타임라인 정렬 (occurred_on DESC, id DESC), V12']
+    (project_id, trust_status, occurred_on, id) [note: 'S04 확인 대기 목록 (occurred_on DESC, id DESC). INCLUDE (record_source_id)로 타임라인 total·확인 대기 수를 index-only로 센다, V13']
+    (project_id, record_type)  [note: 'S03 유형 필터']
+    source_note_id
+    (record_source_id, source_version, extraction_index) [unique, note: '선두 열로 record_source_id 조회도 맡는다']
+    (project_id, id) [unique]
+  }
+
+  Note: '''
+  record_source_id와 source_note_id 중 정확히 하나만 채운다.
+  trust_status가 CONFIRMED 또는 CORRECTED일 때만 confirmed_by와 confirmed_at을 채운다.
+  D12 — 메모의 선택 요약 공유로 만든 기록은 AUTO_DRAFT를 거치지 않고 즉시 CONFIRMED로 생성한다.
+  D9 — AUTO_DRAFT이면서 개인 연결(source_connections.owner_user_id 있음)에서 온 기록은
+       연결한 사용자에게만 보인다. 확인된 기록만 프로젝트 구성원에게 공개된다.
+  '''
+
+  checks {
+    `(record_source_id IS NULL) <> (source_note_id IS NULL)` [name: 'work_records_source_xor']
+    `(trust_status IN ('CONFIRMED','CORRECTED')) = (confirmed_by IS NOT NULL AND confirmed_at IS NOT NULL)` [name: 'work_records_confirmation_pair']
+  }
+}
+
+// FR-06의 수정 이력. CORRECTED로 확정할 때 한 행을 남긴다.
+Table record_revisions {
+  id             bigint       [pk, increment]
+  work_record_id bigint       [not null, ref: > work_records.id]
+  revision_no    integer      [not null]
+  changed_by     bigint       [not null, ref: > users.id]
+  change_reason  varchar(300) [not null]
+  before_summary text         [not null]
+  after_summary  text         [not null]
+  before_data    jsonb        [not null]
+  after_data     jsonb        [not null]
+  changed_at     timestamptz  [not null, default: `now()`]
+
+  Indexes {
+    (work_record_id, revision_no) [unique]
+  }
+}
+
+// D2·D12 — 대체·충돌·참조를 기록의 상태와 분리한다.
+// CONFLICTS_WITH는 대칭이므로 from_record_id < to_record_id인 한 행만 저장한다.
+Table record_relations {
+  id             bigint              [pk, increment]
+  project_id     bigint              [not null, ref: > projects.id]
+  from_record_id bigint              [not null]
+  to_record_id   bigint              [not null]
+  relation_type  record_relation_type [not null]
+  note           varchar(300)        [null]
+  version        bigint              [not null, default: 0, note: 'V3: If-Match target']
+  created_at     timestamptz         [not null, default: `now()`]
+  withdrawn_at   timestamptz         [null, note: 'V20: a relation registered by mistake is withdrawn, not deleted']
+  withdrawn_by   bigint              [null, ref: > users.id]
+  withdrawal_reason varchar(300)     [null]
+
+  Indexes {
+    (from_record_id, to_record_id, relation_type) [unique, name: 'record_relations_record_relation_key', note: 'V20: partial, WHERE withdrawn_at IS NULL']
+    to_record_id
+    (project_id, from_record_id) [unique, note: 'V7·V20: partial, WHERE relation_type = CONFLICTS_WITH AND withdrawn_at IS NULL — one conflict per normalized source record']
+  }
+
+  Note: 'from_record_id와 to_record_id는 서로 달라야 하고 같은 프로젝트여야 한다. 철회된 관계(withdrawn_at)는 행으로 남고 모든 검사에서 없는 것으로 본다.'
+
+  checks {
+    `from_record_id <> to_record_id` [name: 'record_relations_not_self']
+    `relation_type <> 'CONFLICTS_WITH' OR from_record_id < to_record_id` [name: 'record_relations_conflict_order']
+    `(withdrawn_at IS NULL) = (withdrawn_by IS NULL) AND (withdrawn_at IS NULL) = (withdrawal_reason IS NULL)` [name: 'record_relations_withdrawal_complete']
+  }
+}
+
+// ─────────────────────────────────────────────
+// 담당자 교체와 인수인계
+// ─────────────────────────────────────────────
+
+Table handovers {
+  id                           bigint         [pk, increment]
+  code                         varchar(32)    [not null, unique, note: '예: H-001']
+  project_id                   bigint         [not null, ref: > projects.id]
+  requested_by                 bigint         [not null, ref: > users.id, note: 'PROJECT_MANAGER만 요청할 수 있다']
+  outgoing_owner_id            bigint         [not null, ref: > users.id]
+  incoming_owner_id            bigint         [not null, ref: > users.id]
+  effective_on                 date           [not null]
+  scope_from                   date           [not null, note: 'S07 포함 기간 시작']
+  scope_to                     date           [not null]
+  include_note_derived_records boolean        [not null, default: true, note: 'D10 — 메모 원본이 아니라 공유로 생성된 기록의 포함 여부']
+  status                       handover_status [not null, default: 'REQUESTED']
+  progress_percent             smallint       [not null, default: 0]
+  included_count               integer        [not null, default: 0]
+  failure_reason               varchar(500)   [null]
+  requested_at                 timestamptz    [not null, default: `now()`]
+  ready_at                     timestamptz    [null]
+  approved_by                  bigint         [null, ref: > users.id]
+  completed_at                 timestamptz    [null]
+  generation                   integer        [not null, default: 1]
+  version                      bigint         [not null, default: 0]
+  revision_comment             varchar(500)   [null]
+
+  Indexes {
+    (project_id, status)
+    incoming_owner_id [note: 'S02에서 신규 담당자의 배정 여부를 조회']
+    outgoing_owner_id
+    (project_id, id) [unique]
+  }
+
+  checks {
+    `scope_from <= scope_to` [name: 'handovers_scope_order']
+    `outgoing_owner_id <> incoming_owner_id` [name: 'handovers_distinct_owners']
+  }
+}
+
+// S07의 포함 유형이 6종 다중 선택이라 별도 테이블로 분리했다.
+Table handover_scope_types {
+  handover_id bigint     [not null, ref: > handovers.id]
+  record_type record_type [not null]
+
+  Indexes {
+    (handover_id, record_type) [pk]
+  }
+}
+
+Table handover_items {
+  id                    bigint            [pk, increment]
+  handover_id           bigint            [not null, ref: > handovers.id]
+  generation_id         bigint            [not null, ref: > handover_generations.id]
+  project_id            bigint            [not null, ref: > projects.id]
+  item_kind             handover_item_kind [not null]
+  work_record_id        bigint            [null, ref: > work_records.id, note: 'OVERVIEW처럼 근거 기록이 없는 항목은 비운다']
+  title                 varchar(200)      [not null]
+  body                  text              [not null]
+  display_order         integer           [not null]
+  is_required           boolean           [not null, default: false, note: 'S11의 미확인 필수 기록 판정 대상']
+  resolved_by_record_id bigint            [null, ref: > work_records.id, note: 'D2 — 관리자가 최종 근거로 고른 기록']
+  resolution_note       varchar(300)      [null, note: '충돌 해소 사유']
+  assignee_id           bigint            [null, ref: > users.id, note: 'FOLLOW_UP 항목의 담당자']
+  due_on                date              [null, note: 'FOLLOW_UP 항목의 기한']
+  conflict_slot         smallint          [not null, default: 0, note: 'V22: 같은 기록이 출처인 두 번째 이후 충돌마다 그 기록 항목의 사본이 1, 2, …를 갖는다']
+  version               bigint            [not null, default: 0]
+
+  Indexes {
+    (generation_id, display_order) [unique]
+    (generation_id, item_kind, work_record_id, conflict_slot) [unique, note: 'V22: 충돌마다 항목 하나']
+    (project_id, generation_id, id) [unique, note: 'V7: target of handover_item_conflicts (project_id, generation_id, handover_item_id)']
+    (project_id, generation_id)
+    (handover_id, item_kind)
+  }
+}
+
+// ─────────────────────────────────────────────
+// 근거 기반 질의응답
+// ─────────────────────────────────────────────
+
+Table qa_messages {
+  id                  bigint          [pk, increment]
+  handover_id         bigint          [not null, ref: > handovers.id]
+  session_user_id     bigint          [not null, ref: > users.id, note: '대화 소유자. ASSISTANT 행도 같은 사용자에 귀속된다']
+  role                qa_role         [not null]
+  content             text            [not null]
+  answer_status       qa_answer_status [null, note: 'role이 ASSISTANT일 때만 채운다']
+  suggested_contacts  varchar(300)    [null, note: 'NO_EVIDENCE일 때 확인할 사람. 예: 박지민 PL']
+  suggested_documents varchar(300)    [null, note: 'NO_EVIDENCE일 때 확인할 문서']
+  created_at          timestamptz     [not null, default: `now()`]
+  generation_id       bigint          [not null, ref: > handover_generations.id]
+  reply_to_id          bigint          [null, ref: > qa_messages.id]
+  failure_code         varchar(60)     [null]
+  model_id             varchar(120)    [null]
+  prompt_version       varchar(60)     [null]
+
+  Indexes {
+    (handover_id, created_at)
+    (handover_id, session_user_id, id)
+    reply_to_id [unique]
+    (generation_id, handover_id)
+  }
+  // V10 CHECK: USER rows have no reply, status or failure code; ASSISTANT rows reply to one question, and failure_code is set exactly when answer_status is FAILED.
+
+  Note: 'FR-16 — 근거가 없으면 답을 생성하지 않고 NO_EVIDENCE와 확인 대상을 남긴다.'
+}
+
+// 답변 하나가 여러 기록을 인용한다. 인용 시점의 신뢰 상태를 함께 남겨
+// 나중에 기록 상태가 바뀌어도 당시 판단 근거를 재현할 수 있게 한다.
+Table qa_citations {
+  id                     bigint             [pk, increment]
+  qa_message_id          bigint             [not null, ref: > qa_messages.id]
+  work_record_id         bigint             [not null, ref: > work_records.id]
+  snapshot_record_id     bigint             [not null, ref: > handover_snapshot_records.id]
+  trust_status_at_answer record_trust_status [not null]
+  is_primary             boolean            [not null, default: true, note: 'false면 보조 표시. 예: SUPERSEDES로 대체된 이전 일정']
+
+  Indexes {
+    (qa_message_id, work_record_id) [unique]
+    snapshot_record_id [note: 'V10']
+  }
+}
+
+// ─────────────────────────────────────────────
+// 업무 준비도 확인
+// ─────────────────────────────────────────────
+
+Table assessments {
+  id             bigint           [pk, increment]
+  handover_id    bigint           [not null, ref: > handovers.id, note: '인수인계 한 건당 하나']
+  generation_id  bigint           [not null, ref: > handover_generations.id]
+  generation     integer          [not null]
+  status         assessment_status [not null, default: 'NOT_STARTED']
+  pass_threshold smallint         [not null, default: 5, note: '관리자 승인 가능 최소 정답 수']
+  created_at     timestamptz      [not null, default: `now()`]
+
+  Indexes {
+    (handover_id, generation) [unique]
+    generation_id [unique, note: 'V8: one assessment per generation']
+    (generation_id, id) [unique, note: 'V8: target of generation-scoped question and attempt keys']
+  }
+}
+
+Table assessment_questions {
+  id               bigint       [pk, increment]
+  assessment_id    bigint       [not null, ref: > assessments.id]
+  question_no      integer      [not null]
+  question_type    question_type [not null]
+  prompt           varchar(300) [not null]
+  choices          jsonb        [null, note: 'MULTIPLE_CHOICE 공개 선택지 2~5개']
+  accepted_answers jsonb        [null, note: 'SHORT_ANSWER 서버 전용 허용 답안']
+  correct_choice_id varchar(32) [null, note: 'MULTIPLE_CHOICE 서버 전용 정답 ID']
+  generation_id    bigint       [not null, ref: > handover_generations.id]
+  linked_record_id bigint       [not null, ref: > work_records.id, note: '오답 시 이동할 근거 기록']
+
+  Indexes {
+    (assessment_id, question_no) [unique]
+    (generation_id, id) [unique, note: 'V8: target of assessment_answers (generation_id, question_id)']
+  }
+}
+
+Table assessment_attempts {
+  id            bigint      [pk, increment]
+  assessment_id bigint      [not null, ref: > assessments.id]
+  generation_id bigint      [not null, ref: > handover_generations.id]
+  attempt_no    integer     [not null]
+  taken_by      bigint      [not null, ref: > users.id]
+  score         smallint    [not null, default: 0]
+  total         smallint    [not null]
+  submitted_at  timestamptz [null]
+
+  Indexes {
+    (assessment_id, attempt_no) [unique]
+    (generation_id, id) [unique, note: 'V8: target of assessment_answers (generation_id, attempt_id)']
+  }
+}
+
+// 문항별 정오 판정이 있어야 S10에서 틀린 문항의 근거 기록으로 이동할 수 있다.
+Table assessment_answers {
+  id            bigint       [pk, increment]
+  attempt_id    bigint       [not null, ref: > assessment_attempts.id]
+  generation_id bigint       [not null, ref: > handover_generations.id]
+  question_id   bigint       [not null, ref: > assessment_questions.id]
+  answer_text   varchar(300) [not null]
+  is_correct    boolean      [not null]
+
+  Indexes {
+    (attempt_id, question_id) [unique]
+  }
+}
+
+// Stage 2 operational tables. Flyway history is framework-owned and excluded.
+Table jobs {
+  id uuid [pk]
+  kind varchar(32) [not null]
+  target_id bigint [not null]
+  generation integer [null]
+  dedup_key varchar(255) [not null, unique]
+  status varchar(20) [not null]
+  attempts integer [not null, default: 0]
+  available_at timestamptz [not null]
+  deadline_at timestamptz [not null]
+  lease_token uuid [null]
+  lease_until timestamptz [null]
+  failure_code varchar(60) [null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  Indexes {
+    (status, available_at)
+    (kind, target_id, created_at, id) [note: '종류·대상별 최신 job (created_at DESC, id DESC), V12']
+    (status, updated_at) [note: '보존 삭제용 부분 인덱스 WHERE status IN (SUCCEEDED, FAILED), V14']
+  }
+  checks { `attempts >= 0` [name: 'jobs_attempts_nonnegative'] }
+}
+
+Table idempotency_requests {
+  id bigint [pk, increment]
+  actor_id bigint [not null, ref: > users.id]
+  method varchar(8) [not null]
+  path varchar(300) [not null]
+  key uuid [not null]
+  request_hash char(64) [not null]
+  state varchar(20) [not null]
+  target_id bigint [null]
+  http_status integer [null]
+  response_json jsonb [null]
+  created_at timestamptz [not null, default: `now()`]
+  expires_at timestamptz [not null]
+  Indexes {
+    (actor_id, method, path, key) [unique]
+    expires_at [note: '만료 결과 정리용 부분 인덱스 WHERE state = COMPLETED, V14']
+  }
+}
+
+Table audit_events {
+  id bigint [pk, increment]
+  actor_id bigint [null]
+  action varchar(80) [not null]
+  target_type varchar(80) [not null]
+  target_id varchar(80) [not null]
+  result varchar(32) [not null]
+  trace_id varchar(64) [not null]
+  remote_address varchar(64) [null, note: 'filled for the setup-code events and sign-in; cleared after 24 months for sign-in where audit retention is on']
+  occurred_at timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (actor_id, occurred_at) [note: 'V18: partial, WHERE action SIGN_IN — 본인의 로그인 기록을 찾는다']
+    (target_id, occurred_at) [note: 'V18: partial, WHERE action 설정 코드 발급·설정·운영자 재설정 — 본인이 대상인 기록을 찾는다']
+    (occurred_at) [note: 'V19: partial, WHERE action SIGN_IN AND remote_address IS NOT NULL — 주소를 비울 오래된 로그인을 나이순으로 찾는다']
+  }
+
+  Note: 'V21: 추가만 된다. 트리거가 삭제·TRUNCATE와 수정을 거부하고, 로그인 행의 remote_address를 null로 비우는 수정 하나만 통과시킨다(고시 제8조 ③, D5)'
+}
+
+Table handover_generations {
+  id bigint [pk, increment]
+  handover_id bigint [not null, ref: > handovers.id]
+  project_id bigint [not null, ref: > projects.id]
+  generation integer [not null]
+  created_by bigint [not null, ref: > users.id]
+  status handover_status [not null, default: 'REQUESTED']
+  created_at timestamptz [not null, default: `now()`]
+  published_at timestamptz [null]
+  prompt_version varchar(120) [null]
+  Indexes {
+    (handover_id, generation) [unique]
+    (project_id, id) [unique]
+    (project_id, handover_id, id) [unique, note: 'V6: target of handover_items (project_id, handover_id, generation_id)']
+    (id, handover_id) [unique, note: 'V10: target of qa_messages (generation_id, handover_id)']
+    (handover_id, id) [unique, note: 'V8']
+    (id, generation) [unique, note: 'V8: target of assessments (generation_id, generation)']
+  }
+}
+
+Table handover_snapshot_records {
+  id bigint [pk, increment]
+  generation_id bigint [not null, ref: > handover_generations.id]
+  project_id bigint [not null, ref: > projects.id]
+  work_record_id bigint [not null, ref: > work_records.id]
+  record_version bigint [not null]
+  content_json jsonb [not null]
+  trust_status record_trust_status [not null]
+  captured_at timestamptz [not null, default: `now()`]
+  Indexes {
+    (generation_id, work_record_id) [unique]
+    (project_id, generation_id, id) [unique, note: 'V7: target of handover_item_conflicts snapshot keys']
+  }
+}
+
+Table handover_item_conflicts {
+  id bigint [pk, increment]
+  project_id bigint [not null, ref: > projects.id]
+  generation_id bigint [not null, ref: > handover_generations.id]
+  handover_item_id bigint [not null, ref: > handover_items.id]
+  relation_id bigint [not null, ref: > record_relations.id]
+  from_snapshot_id bigint [not null, ref: > handover_snapshot_records.id]
+  to_snapshot_id bigint [not null, ref: > handover_snapshot_records.id]
+  Indexes {
+    (handover_item_id, relation_id) [unique]
+    (generation_id, relation_id) [unique]
+  }
+}
+
+Table handover_item_acknowledgements {
+  id bigint [pk, increment]
+  project_id bigint [not null, ref: > projects.id]
+  generation_id bigint [not null, ref: > handover_generations.id]
+  item_id bigint [not null, ref: > handover_items.id]
+  user_id bigint [not null, ref: > users.id]
+  acknowledged_at timestamptz [not null, default: `now()`]
+  Indexes { (generation_id, item_id, user_id) [unique] }
+}
+
+Table record_embeddings {
+  id uuid [pk]
+  project_id bigint [not null, ref: > projects.id]
+  record_id bigint [not null, ref: > work_records.id]
+  record_version bigint [not null]
+  chunk_no integer [not null]
+  chunk_text text [not null]
+  embedding_model varchar(120) [not null]
+  embedding vector(256) [not null, note: 'V9 fixes 256 dimensions (offline stub model); another model size needs a new migration']
+  created_at timestamptz [not null, default: `now()`]
+  Indexes {
+    (record_id, record_version, chunk_no, embedding_model) [unique]
+    project_id [note: 'V9: project-scoped retrieval filter']
+  }
+}
+
+Table spring_session {
+  primary_id char(36) [pk]
+  session_id char(36) [not null, unique]
+  creation_time bigint [not null]
+  last_access_time bigint [not null]
+  max_inactive_interval integer [not null]
+  expiry_time bigint [not null]
+  principal_name varchar(100) [null]
+
+  Indexes {
+    expiry_time
+    principal_name
+  }
+}
+
+Table spring_session_attributes {
+  session_primary_id char(36) [not null, ref: > spring_session.primary_id]
+  attribute_name varchar(200) [not null]
+  attribute_bytes bytea [not null]
+  Indexes { (session_primary_id, attribute_name) [pk] }
+}
+
+Ref: work_records.(project_id, record_source_id) > record_sources.(project_id, id)
+Ref: work_records.(project_id, source_note_id) > personal_notes.(project_id, id)
+Ref: record_relations.(project_id, from_record_id) > work_records.(project_id, id)
+Ref: record_relations.(project_id, to_record_id) > work_records.(project_id, id)
+Ref: handover_items.(project_id, handover_id) > handovers.(project_id, id)
+Ref: handover_items.(project_id, work_record_id) > work_records.(project_id, id)
+Ref: handover_items.(project_id, handover_id, generation_id) > handover_generations.(project_id, handover_id, id)
+Ref: handover_snapshot_records.(project_id, work_record_id) > work_records.(project_id, id)
+Ref: handover_snapshot_records.(project_id, generation_id) > handover_generations.(project_id, id)
+
+// ─────────────────────────────────────────────
+// 그룹 — dbdiagram.io에서 도메인별로 묶어 표시한다.
+// 관계선을 줄이지는 않지만 읽는 순서를 만들어 준다.
+// ─────────────────────────────────────────────
+
+TableGroup "1. 조직과 권한" {
+  organizations
+  users
+  credential_tokens
+  projects
+  project_members
+}
+
+TableGroup "2. 기록 수집" {
+  source_connections
+  record_sources
+}
+
+TableGroup "3. 프로젝트 기록" {
+  personal_notes
+  work_records
+  record_revisions
+  record_relations
+}
+
+TableGroup "4. 담당자 교체와 인수인계" {
+  handovers
+  handover_scope_types
+  handover_items
+  handover_generations
+  handover_snapshot_records
+  handover_item_conflicts
+  handover_item_acknowledgements
+}
+
+TableGroup "5. 근거 기반 질의응답" {
+  qa_messages
+  qa_citations
+  record_embeddings
+}
+
+TableGroup "6. 업무 준비도 확인" {
+  assessments
+  assessment_questions
+  assessment_attempts
+  assessment_answers
+}
+
+TableGroup "7. 운영 기반" {
+  jobs
+  idempotency_requests
+  audit_events
+  spring_session
+  spring_session_attributes
+}

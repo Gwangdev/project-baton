@@ -1,0 +1,14 @@
+# 운영 프록시: 운영자가 준 인증서로 HTTPS(compose.yml이 BATON_TLS_DIR을 mount한다). Secure 세션 쿠키(README §4.1)는
+# HTTPS로만 돌아온다. admin API도 자동 인증서 발급도 없다.
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+:8443 {
+	tls /etc/baton/tls/cert.pem /etc/baton/tls/key.pem
+	import /etc/caddy/routes.caddy
+}
+
+import /etc/caddy/health.caddy

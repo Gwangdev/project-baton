@@ -1,0 +1,257 @@
+erDiagram
+  organizations {
+    bigint id PK
+    boolean is_active
+  }
+  users {
+    bigint id PK
+    bigint organization_id FK
+    system_role system_role
+    boolean is_active
+  }
+  credential_tokens {
+    bigint id PK
+    bigint user_id FK
+    bigint created_by FK
+  }
+  projects {
+    bigint id PK
+    varchar code
+    project_status status
+    boolean is_active
+  }
+  project_members {
+    bigint id PK
+    bigint project_id FK
+    bigint user_id FK
+    project_role project_role
+  }
+  source_connections {
+    bigint id PK
+    bigint project_id FK
+    bigint owner_user_id FK
+    source_channel channel
+    connection_status status
+    source_health health
+  }
+  record_sources {
+    bigint id PK
+    bigint source_connection_id FK
+    bigint project_id FK
+  }
+  personal_notes {
+    bigint id PK
+    varchar code
+    bigint project_id FK
+    bigint author_id FK
+  }
+  work_records {
+    bigint id PK
+    varchar code
+    bigint project_id FK
+    record_type record_type
+    bigint author_id FK
+    bigint owner_user_id FK
+    record_trust_status trust_status
+    bigint confirmed_by FK
+  }
+  record_revisions {
+    bigint id PK
+    bigint work_record_id FK
+    bigint changed_by FK
+  }
+  record_relations {
+    bigint id PK
+    bigint project_id FK
+    record_relation_type relation_type
+    bigint withdrawn_by FK
+  }
+  handovers {
+    bigint id PK
+    varchar code
+    bigint project_id FK
+    bigint requested_by FK
+    bigint outgoing_owner_id FK
+    bigint incoming_owner_id FK
+    handover_status status
+    bigint approved_by FK
+  }
+  handover_scope_types {
+    bigint handover_id FK
+    record_type record_type
+  }
+  handover_items {
+    bigint id PK
+    bigint handover_id FK
+    bigint generation_id FK
+    bigint project_id FK
+    handover_item_kind item_kind
+    bigint work_record_id FK
+    boolean is_required
+    bigint resolved_by_record_id FK
+    bigint assignee_id FK
+  }
+  qa_messages {
+    bigint id PK
+    bigint handover_id FK
+    bigint session_user_id FK
+    qa_answer_status answer_status
+    bigint generation_id FK
+    bigint reply_to_id FK
+  }
+  qa_citations {
+    bigint id PK
+    bigint qa_message_id FK
+    bigint work_record_id FK
+    bigint snapshot_record_id FK
+    boolean is_primary
+  }
+  assessments {
+    bigint id PK
+    bigint handover_id FK
+    bigint generation_id FK
+    assessment_status status
+  }
+  assessment_questions {
+    bigint id PK
+    bigint assessment_id FK
+    question_type question_type
+    bigint generation_id FK
+    bigint linked_record_id FK
+  }
+  assessment_attempts {
+    bigint id PK
+    bigint assessment_id FK
+    bigint generation_id FK
+    bigint taken_by FK
+    smallint score
+    smallint total
+  }
+  assessment_answers {
+    bigint id PK
+    bigint attempt_id FK
+    bigint generation_id FK
+    bigint question_id FK
+    boolean is_correct
+  }
+  jobs {
+    uuid id PK
+    varchar status
+  }
+  idempotency_requests {
+    bigint id PK
+    bigint actor_id FK
+  }
+  audit_events {
+    bigint id PK
+  }
+  handover_generations {
+    bigint id PK
+    bigint handover_id FK
+    bigint project_id FK
+    bigint created_by FK
+    handover_status status
+  }
+  handover_snapshot_records {
+    bigint id PK
+    bigint generation_id FK
+    bigint project_id FK
+    bigint work_record_id FK
+    record_trust_status trust_status
+  }
+  handover_item_conflicts {
+    bigint id PK
+    bigint project_id FK
+    bigint generation_id FK
+    bigint handover_item_id FK
+    bigint relation_id FK
+    bigint from_snapshot_id FK
+    bigint to_snapshot_id FK
+  }
+  handover_item_acknowledgements {
+    bigint id PK
+    bigint project_id FK
+    bigint generation_id FK
+    bigint item_id FK
+    bigint user_id FK
+  }
+  record_embeddings {
+    uuid id PK
+    bigint project_id FK
+    bigint record_id FK
+  }
+  spring_session {
+    char primary_id PK
+  }
+  spring_session_attributes {
+    char session_primary_id FK
+  }
+  organizations ||--o{ users : "organization_id"
+  users ||--o{ credential_tokens : "user_id"
+  users ||..o{ credential_tokens : "created_by"
+  projects ||--o{ project_members : "project_id"
+  users ||--o{ project_members : "user_id"
+  projects ||--o{ source_connections : "project_id"
+  users ||..o{ source_connections : "owner_user_id"
+  source_connections ||--o{ record_sources : "source_connection_id"
+  projects ||--o{ record_sources : "project_id"
+  projects ||--o{ personal_notes : "project_id"
+  users ||--o{ personal_notes : "author_id"
+  projects ||--o{ work_records : "project_id"
+  users ||..o{ work_records : "author_id"
+  users ||..o{ work_records : "owner_user_id"
+  users ||..o{ work_records : "confirmed_by"
+  work_records ||--o{ record_revisions : "work_record_id"
+  users ||--o{ record_revisions : "changed_by"
+  projects ||--o{ record_relations : "project_id"
+  users ||..o{ record_relations : "withdrawn_by"
+  projects ||--o{ handovers : "project_id"
+  users ||--o{ handovers : "requested_by"
+  users ||--o{ handovers : "outgoing_owner_id"
+  users ||--o{ handovers : "incoming_owner_id"
+  users ||..o{ handovers : "approved_by"
+  handovers ||--o{ handover_scope_types : "handover_id"
+  handovers ||--o{ handover_items : "handover_id"
+  handover_generations ||--o{ handover_items : "generation_id"
+  projects ||--o{ handover_items : "project_id"
+  work_records ||..o{ handover_items : "work_record_id"
+  work_records ||..o{ handover_items : "resolved_by_record_id"
+  users ||..o{ handover_items : "assignee_id"
+  handovers ||--o{ qa_messages : "handover_id"
+  users ||--o{ qa_messages : "session_user_id"
+  handover_generations ||--o{ qa_messages : "generation_id"
+  qa_messages ||..o{ qa_messages : "reply_to_id"
+  qa_messages ||--o{ qa_citations : "qa_message_id"
+  work_records ||--o{ qa_citations : "work_record_id"
+  handover_snapshot_records ||--o{ qa_citations : "snapshot_record_id"
+  handovers ||--o{ assessments : "handover_id"
+  handover_generations ||--o{ assessments : "generation_id"
+  assessments ||--o{ assessment_questions : "assessment_id"
+  handover_generations ||--o{ assessment_questions : "generation_id"
+  work_records ||--o{ assessment_questions : "linked_record_id"
+  assessments ||--o{ assessment_attempts : "assessment_id"
+  handover_generations ||--o{ assessment_attempts : "generation_id"
+  users ||--o{ assessment_attempts : "taken_by"
+  assessment_attempts ||--o{ assessment_answers : "attempt_id"
+  handover_generations ||--o{ assessment_answers : "generation_id"
+  assessment_questions ||--o{ assessment_answers : "question_id"
+  users ||--o{ idempotency_requests : "actor_id"
+  handovers ||--o{ handover_generations : "handover_id"
+  projects ||--o{ handover_generations : "project_id"
+  users ||--o{ handover_generations : "created_by"
+  handover_generations ||--o{ handover_snapshot_records : "generation_id"
+  projects ||--o{ handover_snapshot_records : "project_id"
+  work_records ||--o{ handover_snapshot_records : "work_record_id"
+  projects ||--o{ handover_item_conflicts : "project_id"
+  handover_generations ||--o{ handover_item_conflicts : "generation_id"
+  handover_items ||--o{ handover_item_conflicts : "handover_item_id"
+  record_relations ||--o{ handover_item_conflicts : "relation_id"
+  handover_snapshot_records ||--o{ handover_item_conflicts : "from_snapshot_id"
+  handover_snapshot_records ||--o{ handover_item_conflicts : "to_snapshot_id"
+  projects ||--o{ handover_item_acknowledgements : "project_id"
+  handover_generations ||--o{ handover_item_acknowledgements : "generation_id"
+  handover_items ||--o{ handover_item_acknowledgements : "item_id"
+  users ||--o{ handover_item_acknowledgements : "user_id"
+  projects ||--o{ record_embeddings : "project_id"
+  work_records ||--o{ record_embeddings : "record_id"
+  spring_session ||--o{ spring_session_attributes : "session_primary_id"

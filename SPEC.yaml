@@ -1,0 +1,112 @@
+# 공개 API 표면: 백엔드가 내주는 모든 endpoint이고, 그 밖의 것은 없다.
+#
+# 목록은 설계와 함께 정하고, 코드에 맞추려고가 아니라 설계 결정으로만 바꾼다. tools/check_backend_contract.py가
+# ProjectBaton-API.yml과 대조한다(양쪽의 모든 경로와 메서드). 개발 과정에서는 개발 기록과 함께 둔 정적 검사로 코드가
+# 선언한 endpoint와도 비교해서, 여기 있는데 코드에 없거나 코드에 있는데 여기 없는 endpoint는 실패한다.
+#
+# 비교할 때 경로 변수 이름은 무시한다({id}와 {orderId}는 같다). 이름은 사람이 읽으라고 붙인다.
+
+version: 1
+
+# 커밋 직전에 `gate.py --commit`이 돌린다. 시험 파일이 있는 것(T1)과 시험이 통과하는 것은 다른 사실이다. 빼면 게이트가
+# 대신 경고한다.
+test_command: "./backend/gradlew -p backend clean build"
+
+# 서비스 자체 코드가 있는 곳. 밖에 있는 것은 공개 표면으로 세지 않는다. 빼면 저장소 전체를 훑고, 기존 프로젝트에는
+# 영향이 없다.
+#
+# 저장소에 서비스 표면이 아닌 코드(예제 프로젝트, 채점·시험 fixture, monorepo의 다른 서비스)도 있을 때 쓴다. 그렇지
+# 않으면 그 controller가 S4(과잉)로 나온다. 그런 것을 `exclude`에 넣지 않는다. 그 목록은 「우리 표면이지만 일부러
+# 관리하지 않는 것」이라 항목마다 이유를 담는데, 「아예 우리 코드가 아닌 것」을 섞으면 둘을 구분할 수 없고 fixture를
+# 더할 때마다 목록이 늘어난다.
+#
+code_roots:
+  - frontend/src        # 1단계 산출물. 2단계에서 backend/src/main을 추가한다.
+  - backend/src/main/java
+
+# 컬렉션 전체를 대상으로 하는 PUT/DELETE는 한 번의 오작동으로 데이터셋을 지운다.
+# `gate.py`가 A4로 막고, 정말 필요하면 항목에 사유를 달아 의도를 남긴다.
+#
+#   - endpoint: DELETE /api/sessions
+#     reason: 만료 세션 일괄 정리 — 관리자 권한·감사 로그 적용
+#
+# exclude와 혼동하지 않는다. exclude는 명세 관리 밖의 경로용이고, 거기 적으면
+# S3·S4 대조에서도 함께 빠진다.
+
+endpoints:
+  - POST   /api/v1/auth/sign-in
+  - POST   /api/v1/auth/sign-out
+  - POST   /api/v1/auth/credentials
+  - GET    /api/v1/auth/csrf
+  - GET    /api/v1/me
+  - GET    /api/v1/dashboard
+  - GET    /api/v1/projects
+  - GET    /api/v1/projects/{projectId}
+  - GET    /api/v1/projects/{projectId}/members
+  - GET    /api/v1/projects/{projectId}/records
+  - GET    /api/v1/records/{recordId}
+  - POST   /api/v1/records/{recordId}/review
+  - POST   /api/v1/projects/{projectId}/record-relations
+  - POST   /api/v1/record-relations/{relationId}/withdrawal
+  - GET    /api/v1/projects/{projectId}/notes
+  - POST   /api/v1/projects/{projectId}/notes
+  - POST   /api/v1/notes/{noteId}/share
+  - GET    /api/v1/projects/{projectId}/connections
+  - POST   /api/v1/projects/{projectId}/connections
+  - GET    /api/v1/connections/{connectionId}
+  - PATCH  /api/v1/connections/{connectionId}
+  - DELETE /api/v1/connections/{connectionId}
+  - POST   /api/v1/connections/{connectionId}/reconnect
+  - GET    /api/v1/connections/{connectionId}/files
+  - POST   /api/v1/connections/{connectionId}/files/{sourceId}/records
+  - POST   /api/v1/connections/{connectionId}/files/{sourceId}/processing-attempts
+  - GET    /api/v1/projects/{projectId}/handovers
+  - POST   /api/v1/projects/{projectId}/handovers
+  - GET    /api/v1/handovers/{handoverId}
+  - POST   /api/v1/handovers/{handoverId}/retry
+  - POST   /api/v1/handovers/{handoverId}/generations
+  - GET    /api/v1/handovers/{handoverId}/items
+  - PATCH  /api/v1/handovers/{handoverId}/items/{itemId}
+  - POST   /api/v1/handovers/{handoverId}/items/{itemId}/acknowledgements
+  - POST   /api/v1/handovers/{handoverId}/approval
+  - GET    /api/v1/handovers/{handoverId}/questions
+  - POST   /api/v1/handovers/{handoverId}/questions
+  - GET    /api/v1/handovers/{handoverId}/assessment
+  - POST   /api/v1/handovers/{handoverId}/assessment/attempts
+  - GET    /api/v1/admin/organizations
+  - POST   /api/v1/admin/organizations
+  - PATCH  /api/v1/admin/organizations/{organizationId}
+  - DELETE /api/v1/admin/organizations/{organizationId}
+  - GET    /api/v1/admin/users
+  - POST   /api/v1/admin/users
+  - POST   /api/v1/admin/users/{userId}/credential-tokens
+  - PATCH  /api/v1/admin/users/{userId}
+  - DELETE /api/v1/admin/users/{userId}
+  - GET    /api/v1/admin/projects
+  - POST   /api/v1/admin/projects
+  - PATCH  /api/v1/admin/projects/{projectId}
+  - DELETE /api/v1/admin/projects/{projectId}
+  - GET    /api/v1/admin/projects/{projectId}/members
+  - POST   /api/v1/admin/projects/{projectId}/members
+  - PATCH  /api/v1/admin/projects/{projectId}/members/{memberId}
+  - DELETE /api/v1/admin/projects/{projectId}/members/{memberId}
+
+exclude:
+  # 명세 관리 밖의 경로(프레임워크가 주는 endpoint 등)에만 쓴다. 이유를 반드시 적는다. 이유 없는 exclude는 비교를
+  # 끈다.
+  - endpoint: GET /actuator/health/liveness
+    reason: Spring Boot Actuator가 내부 관리 포트에서 제공하는 프로세스 생존 상태
+  - endpoint: GET /actuator/health/readiness
+    reason: Spring Boot Actuator가 내부 관리 포트에서 제공하는 DB 준비 상태
+  - endpoint: GET /actuator/prometheus
+    reason: Spring Boot Actuator와 Micrometer가 내부 관리 포트에서 제공하는 지표
+  - endpoint: GET /error
+    reason: 서블릿 컨테이너의 오류 dispatch 대상. 업무 API가 아니며 ProblemErrorController가 필터·방화벽·컨테이너 오류를 C01 Problem으로 렌더링한다. 오류 dispatch는 실패한 요청의 메서드를 유지하므로 API가 쓰는 다섯 메서드를 모두 받는다. 직접 요청은 401 또는 404만 받는다
+  - endpoint: POST /error
+    reason: 서블릿 컨테이너의 오류 dispatch 대상. 업무 API가 아니며 ProblemErrorController가 필터·방화벽·컨테이너 오류를 C01 Problem으로 렌더링한다. 오류 dispatch는 실패한 요청의 메서드를 유지하므로 API가 쓰는 다섯 메서드를 모두 받는다. 직접 요청은 401 또는 404만 받는다
+  - endpoint: PUT /error
+    reason: 서블릿 컨테이너의 오류 dispatch 대상. 업무 API가 아니며 ProblemErrorController가 필터·방화벽·컨테이너 오류를 C01 Problem으로 렌더링한다. 오류 dispatch는 실패한 요청의 메서드를 유지하므로 API가 쓰는 다섯 메서드를 모두 받는다. 직접 요청은 401 또는 404만 받는다
+  - endpoint: PATCH /error
+    reason: 서블릿 컨테이너의 오류 dispatch 대상. 업무 API가 아니며 ProblemErrorController가 필터·방화벽·컨테이너 오류를 C01 Problem으로 렌더링한다. 오류 dispatch는 실패한 요청의 메서드를 유지하므로 API가 쓰는 다섯 메서드를 모두 받는다. 직접 요청은 401 또는 404만 받는다
+  - endpoint: DELETE /error
+    reason: 서블릿 컨테이너의 오류 dispatch 대상. 업무 API가 아니며 ProblemErrorController가 필터·방화벽·컨테이너 오류를 C01 Problem으로 렌더링한다. 오류 dispatch는 실패한 요청의 메서드를 유지하므로 API가 쓰는 다섯 메서드를 모두 받는다. 직접 요청은 401 또는 404만 받는다

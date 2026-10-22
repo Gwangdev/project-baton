@@ -1,0 +1,15 @@
+#!/usr/sbin/nft -f
+# 공개 데모의 방문자별 연결 한도(work-orders D7, 결정 6). 비용은 이미 전송 상한과 할당이 묶고, 이 한도는 주소 하나가
+# 다른 방문자를 밀어내지 못하게 한다. Docker는 프록시 포트를 DNAT로 열어서 방문자의 패킷은 input이 아니라 forward
+# hook을 지나고, 프록시가 80과 443을 직접 받아서 DNAT 뒤에도 포트가 같다. 한도는 요청이 아니라 연결을 센다. keep-alive
+# 연결 하나의 많은 요청은 앱 자체의 한도(로그인, Q&A)에 맡긴다. 부팅 때 baton-firewall.service가 불러오고, 다시
+# 불러오면 테이블을 바꾼다.
+table inet baton
+delete table inet baton
+table inet baton {
+	chain forward {
+		type filter hook forward priority filter - 1; policy accept;
+		tcp dport { 80, 443 } ct state new meter baton_new_connections size 65535 { ip saddr timeout 60s limit rate over 20/second burst 40 packets } drop
+		tcp dport { 80, 443 } ct state new meter baton_open_connections size 65535 { ip saddr ct count over 32 } drop
+	}
+}

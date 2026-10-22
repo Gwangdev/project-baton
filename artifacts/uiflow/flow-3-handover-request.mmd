@@ -1,0 +1,24 @@
+flowchart TD
+  %% 3a — 프로젝트 관리자의 교체 요청과 패키지 생성.
+  %% S08 에서 3b 로 이어진다. 이음매 간선은 양쪽 도면에 겹쳐 그린다.
+  S02["S02 프로젝트 대시보드"] --> S07["S07 담당자 교체 요청<br/>담당자 · 기간 · 유형 · 공개 범위"]
+  S07 -->|"패키지 생성 요청"| S08["S08 패키지 생성 상태<br/>REQUESTED → GENERATING → READY"]
+
+  S07 -->|"제출 불가"| B1["제출 차단 사유 표시<br/>관리자 아님<br/>신규 담당자 미지정<br/>유형 미선택"]
+  B1 --> S07
+  S08 -->|"충돌 미해소"| B2["최종 근거 선택 요구"]
+  B2 --> S08
+  S08 -->|"생성 실패"| B3["재시도"]
+  B3 --> S08
+
+  S02 --> S12["S12 시스템 관리<br/>사용자 · 조직 · 프로젝트 · 연동"]
+  S12 -->|"일반 사용자"| B6["연동 상태만 조회"]
+
+  S08 -->|"생성 완료"| S09(["3b 로 이어짐<br/>S09 인수인계 패키지"])
+
+  classDef screen fill:#ffffff,stroke:#0b1b33,stroke-width:1.5px,color:#0b1b33
+  classDef err fill:#fff3ec,stroke:#ff6b2c,color:#5b6b80
+  classDef seam fill:#f4f6f9,stroke:#5b6b80,stroke-dasharray:4 3,color:#0b1b33
+  class S02,S07,S08,S12 screen
+  class B1,B2,B3,B6 err
+  class S09 seam

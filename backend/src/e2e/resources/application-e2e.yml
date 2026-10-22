@@ -1,0 +1,9 @@
+# 실제 백엔드 브라우저 시험용 bootRunE2e 작업만 쓰는 프로필. seed 비밀번호는 환경에서 읽고 기본값은 없다.
+baton:
+  # 브라우저 E2E 스택은 localhost의 평문 HTTP다.
+  session:
+    cookie-secure: false
+  e2e:
+    seed-password: ${BATON_SEED_PASSWORD:}
+  ai:
+    profile: stub

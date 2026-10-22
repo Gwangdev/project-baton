@@ -1,0 +1,12 @@
+# compose healthcheck용 컨테이너 안 health endpoint. loopback에만 묶이고 프록시 뒤의 API가 준비됐다고 알릴 때만
+# 답해서, 프록시가 healthy면 준비된 API까지 가는 길이 살아 있다는 뜻이다.
+http://127.0.0.1:8079 {
+	bind 127.0.0.1
+	handle /healthz {
+		rewrite * /actuator/health/readiness
+		reverse_proxy app:8081
+	}
+	handle {
+		respond 404
+	}
+}
