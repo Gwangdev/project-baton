@@ -179,6 +179,8 @@
 <script src="./erd-data.js"></script>
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'
+  import elk from 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.2.3/dist/mermaid-layout-elk.esm.min.mjs'
+  mermaid.registerLayoutLoaders(elk)
   for (const el of document.querySelectorAll('[data-stat]')) el.textContent = window.__STATS[el.dataset.stat]
   document.getElementById('mmd').textContent = window.__MMD
   mermaid.initialize({
@@ -190,6 +192,11 @@
       lineColor: '#5b6b80', tertiaryColor: '#f4f6f9',
     },
     er: { entityPadding: 10, fontSize: 12 },
+    // 관계선을 곡선 대신 직각으로 꺾어 그리면 선이 겹쳐도 어느 테이블에서 나와 어디로 가는지 따라갈 수 있어서 ELK 배치를
+    // 쓴다. UI 흐름도(tools/mermaid_png.py)가 쓰는 0.1.7은 record_relations에 닿는 관계선 끝을 테이블에서 띄워 그려서
+    // 여기서는 0.2.3을 쓴다.
+    layout: 'elk',
+    elk: { edgeRouting: 'ORTHOGONAL', mergeEdges: false, nodePlacementStrategy: 'BRANDES_KOEPF' },
   })
   await mermaid.run({ nodes: [document.getElementById('mmd')] })
 
