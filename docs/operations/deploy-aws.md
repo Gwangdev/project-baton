@@ -11,7 +11,7 @@ work-orders D7의 배포를 사람이 콘솔에서 하는 순서다. AWS 자원�
 
 ## 2. GitHub가 ECR에 올리는 권한 (OIDC, 저장된 키 없음)
 1. `IAM → 자격 증명 공급자 → 공급자 추가`: OpenID Connect, URL `https://token.actions.githubusercontent.com`, 대상 `sts.amazonaws.com`.
-2. `IAM → 역할 → 역할 생성 → 사용자 지정 신뢰 정책`: [`infra/aws/github-oidc-trust.json`](../../infra/aws/github-oidc-trust.json)의 `<ACCOUNT_ID>`, `<GITHUB_OWNER>/<REPOSITORY>`를 채운다(main 브랜치의 workflow만 이 역할을 쓴다). 이름 예: `baton-github-ecr-push`.
+2. `IAM → 역할 → 역할 생성 → 사용자 지정 신뢰 정책`: [`infra/aws/github-oidc-trust.json`](../../infra/aws/github-oidc-trust.json)의 `<ACCOUNT_ID>`와 `sub` 값을 채운다(main 브랜치의 workflow만 이 역할을 쓴다). 2026-07-15 이후에 만든 GitHub 저장소는 `sub`에 소유자와 저장소의 숫자 ID가 붙는 형식(`repo:<GITHUB_OWNER>@<OWNER_ID>/<REPOSITORY>@<REPOSITORY_ID>:ref:refs/heads/main`)을 쓰고, 이름만 넣으면 CI가 `Not authorized to perform sts:AssumeRoleWithWebIdentity`로 실패한다. `gh api repos/<GITHUB_OWNER>/<REPOSITORY>/actions/oidc/customization/sub`가 돌려주는 `sub_claim_prefix` 뒤에 `:ref:refs/heads/main`을 붙인 값을 넣는다(그보다 오래된 저장소면 `repo:<GITHUB_OWNER>/<REPOSITORY>:ref:refs/heads/main`). 이름 예: `baton-github-ecr-push`.
 3. 그 역할에 인라인 정책으로 [`infra/aws/ecr-push-policy.json`](../../infra/aws/ecr-push-policy.json)을 붙인다(`project-baton/*` 저장소에 올리기만).
 4. GitHub 저장소 `Settings → Secrets and variables → Actions`: 변수 `AWS_ECR_PUSH_ROLE_ARN`에 역할 ARN, 비밀값 `BATON_DEMO_PASSWORD`에 데모 비밀번호. 변수가 없으면 CI의 이미지 작업은 건너뛴다.
 
