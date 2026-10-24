@@ -77,3 +77,14 @@ daemon through read-only host mounts, and the Docker socket would hand it the wh
 | Metrics store and alert rules | `prom/prometheus:v3.15.0` | `sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e` |
 | Dashboards | `grafana/grafana:13.2.3` | `sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572` |
 | Database statistics | `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` | `sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e` |
+
+### Nightly backup image (D2)
+
+`infra/backup/Dockerfile` builds on the database image above, so `pg_dump` matches the server's major version, and adds
+one Debian package pinned by version: `age=1.1.1-1+b3` (public-key encryption of each dump). The private key never enters
+the image; only the recipients file (public keys) is mounted at run time.
+
+The base image declares `VOLUME /var/lib/postgresql/data`, so every backup container also gets an anonymous volume it
+never writes to. The check scripts run their one-off containers with `--rm`, which removes that volume with the
+container, but the Compose `backup` service keeps it: recreating the service or `docker compose down` without `-v` leaves
+it behind, and `docker volume prune` clears it.
