@@ -4,6 +4,9 @@ header {
 	X-Content-Type-Options nosniff
 	X-Frame-Options DENY
 	Referrer-Policy same-origin
+	# 빌드한 앱은 스크립트·스타일·글꼴·이미지를 모두 이 출처의 파일로 받고 inline 스크립트나 외부 CDN을 쓰지 않아서,
+	# 출처를 'self' 하나로 묶어도 화면이 그대로 돈다. 그러면 주입된 스크립트나 외부로 데이터를 보내는 요청이 실행되지 않는다.
+	Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 	-Server
 }
 

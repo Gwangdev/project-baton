@@ -79,6 +79,8 @@ headers() { curl -ksS -o /dev/null -D - -H 'Accept-Encoding: zstd, gzip' "$site$
 page=$(headers /)
 grep -qi '^cache-control: no-cache' <<<"$page" && pass "the page is revalidated (no-cache)" || fail "the page is revalidated (no-cache)"
 grep -qi '^strict-transport-security:' <<<"$page" && pass "HSTS is sent" || fail "HSTS is sent"
+grep -qi "^content-security-policy: default-src 'self';.*script-src 'self';" <<<"$page" \
+  && pass "the page limits scripts to its own origin (CSP)" || fail "the page limits scripts to its own origin (CSP)"
 asset=$(curl -ksS "$site/" | grep -oE '/assets/[^"]+\.js' | head -1)
 asset_headers=$(headers "$asset")
 grep -qi '^cache-control: public, max-age=31536000, immutable' <<<"$asset_headers" && pass "hashed assets are cached as immutable" || fail "hashed assets are cached as immutable"
