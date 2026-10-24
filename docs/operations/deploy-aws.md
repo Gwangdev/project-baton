@@ -79,7 +79,7 @@ free -h && docker stats --no-stream
 `Billing → Budgets → 예산 생성 → 비용 예산`, 월 금액은 고정비 계산값 근처. **고급 옵션에서 크레딧을 빼고(실제 사용액 기준)** 50·80·100%에 이메일 알림. 같은 예산에 `작업(Actions)`으로 임계치에서 이 EC2 인스턴스를 멈추는 동작을 붙일 수 있으면 붙인다(설정 화면에서 지원 범위를 확인해 `evidence/D7.md`에 적는다). 비용 집계는 실시간이 아니므로 첫 번째 방어는 호스트의 전송 상한·할당이다.
 
 ## 운영
-- **새 버전:** main에 push → CI가 이미지 → 호스트에서 `cd /opt/baton && git pull`, `deploy.env`의 `BATON_IMAGE_TAG`를 새 해시로 바꾸고 `infra/host/deploy.sh`.
+- **새 버전:** main에 push → CI가 이미지 → 호스트에서 `cd /opt/baton && git pull`, `deploy.env`의 `BATON_IMAGE_TAG`를 새 해시로 바꾸고 `infra/host/deploy.sh`. `infra/host/` 아래(systemd 단위·nftables·tc)가 바뀐 커밋이면 그 전에 `infra/host/setup.sh`를 다시 돌려 호스트에 설치된 사본을 맞춘다.
 - **매일 04:00(KST):** `baton-demo-reset.timer`가 기준 덤프로 되돌린다. 즉시: `systemctl start baton-demo-reset.service`.
 - **전송 할당:** `cat /var/lib/baton/egress/$(date -u +%Y-%m).bytes`. 할당을 넘으면 프록시가 멈추고 다음 달 1일에 다시 뜬다.
 - **실패 확인(알림 없음):** 호스트에는 알림 채널이 없다. 매일 초기화가 실패하면 앱이 멈춘 채 503 안내가 남고, 전송 할당 스크립트가 실패하면 할당이 조용히 꺼진다(속도 상한은 남는다). 시연 전과 배포 뒤에 `systemctl list-units --failed 'baton-*'`가 비어 있는지, `systemctl list-timers 'baton-*'`의 마지막 실행 시각을 본다. 실패했으면 `journalctl -u baton-demo-reset -n 50`(또는 `-u baton-egress-quota`)로 원인을 보고 `systemctl start baton-demo-reset.service`로 다시 돌린다. 운영 배포는 회사 관측 체계에 붙인다(A-14).

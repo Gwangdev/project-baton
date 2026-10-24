@@ -2,6 +2,10 @@
 Description=Project Baton: put the public demo back to its baseline (work-orders D7, decision 12)
 After=docker.service
 Requires=docker.service
+# setup.sh가 timer를 켜는 시점에는 배포 설정과 기준 덤프가 아직 없다. 첫 deploy.sh 전에 04:00이 지나면 초기화가
+# 실패로 남아 운영 점검(systemctl list-units --failed)이 거짓 경보를 내므로, 둘 중 하나라도 없으면 실행하지 않고 넘긴다.
+ConditionPathExists=/etc/baton/deploy.env
+ConditionPathExists=/var/lib/baton/demo-baseline.dump
 
 [Service]
 Type=oneshot
