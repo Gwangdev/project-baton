@@ -33,7 +33,7 @@ const HTML = `<!doctype html><meta charset="utf-8">
 </style>
 <pre class="mermaid" id="mmd"></pre>
 <script type="module">
-import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs'
 import elk from 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.7/dist/mermaid-layout-elk.esm.min.mjs'
 mermaid.registerLayoutLoaders(elk)
 mermaid.initialize({

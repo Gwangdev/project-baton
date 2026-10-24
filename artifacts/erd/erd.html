@@ -15,7 +15,8 @@
 
   section { padding: 40px; }
   /* 본문(10장)은 하늘색 배경 위에 얹히므로 투명하게 둔다. */
-  #summary { width: 1400px; background: transparent; }
+  /* 그림판(.canvas)이 1400px이고 좌우 여백이 40px씩이라, 너비를 그만큼 더해야 오른쪽 상자가 가장자리에 붙지 않는다. */
+  #summary { width: 1480px; background: transparent; }
   /* Appendix(13장)는 흰색 페이지다. */
   #full, #dblist { width: 1600px; background: #fff; }
 
@@ -178,7 +179,7 @@
 
 <script src="./erd-data.js"></script>
 <script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs'
   import elk from 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.2.3/dist/mermaid-layout-elk.esm.min.mjs'
   mermaid.registerLayoutLoaders(elk)
   for (const el of document.querySelectorAll('[data-stat]')) el.textContent = window.__STATS[el.dataset.stat]
