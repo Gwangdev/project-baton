@@ -3,7 +3,8 @@
 # 없는 사용자로 돌린다. 읽기 전용 루트 파일 시스템과 /tmp tmpfs는 compose.yml이 더한다.
 # 빌드에 줄 수 있는 읽기 전용 Gradle 의존성 캐시(compose.yml이 BATON_GRADLE_RO_CACHE로 넘기고, 보통 그 기계의
 # ~/.gradle/caches). Gradle이 Maven Central보다 먼저 읽어서(GRADLE_RO_DEP_CACHE), 이 프로젝트를 한 번 빌드한 기계는
-# Maven Central이 요청을 거절해도(반복 빌드 뒤 하루 넘게 429로 답했다) 네트워크 없이 이미지를 빌드한다. 캐시를 주지
+# Maven Central이 요청을 거절해도(반복 빌드 뒤 하루 넘게 429로 답했다) 의존성을 그 캐시에서 읽어 이미지를 빌드한다.
+# Gradle 배포본은 wrapper가 services.gradle.org에서 받으므로 네트워크가 아예 없어도 되는 것은 아니다. 캐시를 주지
 # 않으면 이 빈 단계가 대신하고 Gradle은 전처럼 내려받는다.
 FROM scratch AS gradle-ro-cache
 
