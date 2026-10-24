@@ -9,7 +9,7 @@ Project Baton은 메일·결재·메신저·회의록·업무 폴더·개인 메
 
 [공개 데모](https://baton.gwang.dev) · [API 명세](ProjectBaton-API.yml) · [설계 문서](docs/backend-design/README.md) · [검증 증거](docs/backend-design/evidence/)
 
-`Status: Portfolio` · 공개 데모 배포 준비 중 · 모든 데이터는 합성 데이터
+`Status: Portfolio` · 공개 데모 운영 중 · 모든 데이터는 합성 데이터
 
 <img width="1400" alt="인수인계 패키지와 근거 기반 질의응답 화면" src="artifacts/screens/S09-패키지-근거있는답변.png" />
 
@@ -82,7 +82,7 @@ flowchart LR
 
 ## 공개 데모
 
-`https://baton.gwang.dev`(배포 준비 중). 합성 데이터만 담은 공개 데모이며, 데이터는 매일 04:00(KST)에 처음 상태로 돌아갑니다. 실제 개인정보나 회사 자료를 입력하지 마십시오. 로그인하면 접속 주소(IP)가 감사 기록에 남고, 매일 초기화 때 함께 지워집니다. AI는 오프라인 stub입니다.
+`https://baton.gwang.dev`. 합성 데이터만 담은 공개 데모이며, 데이터는 매일 04:00(KST)에 처음 상태로 돌아갑니다. 실제 개인정보나 회사 자료를 입력하지 마십시오. 로그인하면 접속 주소(IP)가 감사 기록에 남고, 매일 초기화 때 함께 지워집니다. AI는 오프라인 stub입니다.
 
 | 사번 | 이름 | 역할 |
 |---|---|---|
@@ -154,7 +154,7 @@ tools/            API 계약 검사기, AI 평가 세트·다이어그램 생성
 | 부하 | 60 RPS 일반 요청 p95 20~66ms, 버려진 요청 0(단축 3회·전체 1회) | [`performance.md`](docs/backend-design/evidence/performance.md) |
 | 실제 AI | 합성 평가(문서 50·질문 30): OpenAI `gpt-5.4-mini` 구조화 50/50·Q&A 30/30, 로컬 Ollama `qwen3:4b` 구조화 46/50·Q&A 27/30, Google `gemini-3.5-flash-lite`는 무료 등급 한도로 축소 평가(8·8 통과) | [`model-profile.md`](docs/backend-design/evidence/model-profile.md) |
 | 백업·복구 | age 공개키로 암호화한 야간 백업, 일회용 DB로 복원 확인 | [`recovery.md`](docs/backend-design/evidence/recovery.md) |
-| 공개 데모 배포 | 실제 배포 형태를 로컬에서 띄워 15개 항목 확인(DB 계정 분리, 압축·캐시, 데모 계정, 매일 초기화) | [`D7.md`](docs/backend-design/evidence/D7.md) |
+| 공개 데모 배포 | 실제 배포 형태를 로컬에서 띄워 16개 항목 확인(DB 계정 분리, 압축·캐시, 보안 헤더, 데모 계정, 매일 초기화). AWS EC2 배포 뒤 인증서·보안 헤더·메모리 확인 | [`D7.md`](docs/backend-design/evidence/D7.md) |
 
 ### 한계와 다음 단계
 
