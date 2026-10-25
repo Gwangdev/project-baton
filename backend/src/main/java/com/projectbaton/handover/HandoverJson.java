@@ -42,21 +42,11 @@ public class HandoverJson {
         node.put("includedCount", detail.includedCount());
         putNullable(node, "revisionComment", detail.revisionComment());
         putNullable(node, "failureReason", detail.failureReason());
+        // 충돌은 OAS에서 관계 API와 같은 RecordRelation이라 같은 레코드를 같은 직렬화로 내보낸다. 필드를 손으로 나열하던
+        // 때는 철회 정보가 빠진 채 나갔다. 이 회차를 만든 뒤 철회된 관계도 목록에 남아서, 화면이 그 쌍은 더 해소할 수
+        // 없고 패키지를 다시 만들어야 한다고 알릴 수 있다.
         ArrayNode conflicts = node.putArray("conflicts");
-        for (HandoverQueryService.Conflict conflict : detail.conflicts()) {
-            ObjectNode relation = conflicts.addObject();
-            relation.put("id", conflict.id());
-            relation.put("version", conflict.version());
-            relation.put("projectId", conflict.projectId());
-            relation.put("fromRecordId", conflict.fromRecordId());
-            relation.put("toRecordId", conflict.toRecordId());
-            relation.put("relationType", conflict.relationType());
-            putNullable(relation, "note", conflict.note());
-            // 이 회차를 만든 뒤 철회된 관계도 철회 정보와 함께 목록에 남겨서, 화면이 그 쌍은 더 해소할 수 없고
-            // 패키지를 다시 만들어야 한다고 알릴 수 있게 한다.
-            putNullable(relation, "withdrawnAt", conflict.withdrawnAt());
-            putNullable(relation, "withdrawalReason", conflict.withdrawalReason());
-        }
+        detail.conflicts().forEach(relation -> conflicts.add((JsonNode) json.valueToTree(relation)));
         ArrayNode unconfirmed = node.putArray("unconfirmedRecords");
         detail.unconfirmedRecords().forEach(record -> unconfirmed.add((JsonNode) json.valueToTree(record)));
         ArrayNode blockers = node.putArray("approvalBlockers");

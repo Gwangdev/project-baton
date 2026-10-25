@@ -46,6 +46,8 @@ class HandoverPackageIT {
     @Autowired JobLeaseService leases;
     @Autowired ApplicationContext applicationContext;
     @Autowired com.projectbaton.record.RecordRelationService relations;
+    @Autowired HandoverQueryService queries;
+    @Autowired HandoverJson handoverJson;
     @Autowired tools.jackson.databind.ObjectMapper json;
     private long organizationId;
 
@@ -252,7 +254,11 @@ class HandoverPackageIT {
         long item = jdbc.queryForObject("select id from handover_items where handover_id=? and work_record_id=? and item_kind='SCHEDULE'",
                 Long.class, handover, current);
 
-        relations.withdraw(seed.managerId(), relation, 0, json.readTree("{\"reason\":\"The move was never agreed.\"}"));
+        var withdrawn = relations.withdraw(seed.managerId(), relation, 0, json.readTree("{\"reason\":\"The move was never agreed.\"}"));
+
+        // 상세의 충돌은 OAS에서 관계 API와 같은 RecordRelation이다. 철회 정보가 빠지거나 시각 형식이 달라지면 화면이
+        // 그 쌍을 더 해소할 수 없다고 알리지 못한다.
+        assertEquals(json.valueToTree(withdrawn), handoverJson.detail(queries.detail(seed.managerId(), handover)).get("conflicts").get(0));
 
         List<String> blocked = blockers(handover);
         assertTrue(blocked.contains("RELATIONS_WITHDRAWN"), blocked.toString());

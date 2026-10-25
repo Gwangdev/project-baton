@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.projectbaton.project.ProjectAccessPolicy;
 import com.projectbaton.record.RecordQueryService;
+import com.projectbaton.record.RecordRelationService;
 import com.projectbaton.shared.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -85,16 +86,16 @@ public class HandoverQueryService {
                         summary.generation(), summary.effectiveOn()), readiness.businessDay());
         // 충돌은 이 회차를 발행할 때 고정한 쌍에서 오므로 나중에 등록한 관계가 패키지가 보여 준 것을 바꾸지 못한다.
         // 초안은 아직 확정되지 않은 근거를 경고하는 것이어서 살아 있는 값을 쓴다.
-        List<Conflict> conflicts = jdbc.query("""
-                select relation.id, relation.version, relation.project_id, relation.from_record_id, relation.to_record_id,
-                       relation.relation_type::text, relation.note, relation.withdrawn_at, relation.withdrawal_reason
+        List<RecordRelationService.RecordRelation> conflicts = jdbc.query("""
+                select relation.id, relation.project_id, relation.from_record_id, relation.to_record_id, relation.relation_type::text,
+                       relation.note, relation.version, relation.withdrawn_at, relation.withdrawal_reason
                 from handover_item_conflicts conflict
                 join handover_generations generation on generation.id=conflict.generation_id
                 join record_relations relation on relation.id=conflict.relation_id
                 where generation.handover_id=? and generation.generation=?
                 order by relation.id
-                """, (rs, row) -> new Conflict(rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getLong(4), rs.getLong(5),
-                rs.getString(6), rs.getString(7), rs.getObject(8, java.time.OffsetDateTime.class), rs.getString(9)),
+                """, (rs, row) -> new RecordRelationService.RecordRelation(rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getLong(4),
+                rs.getString(5), rs.getString(6), rs.getLong(7), rs.getObject(8, OffsetDateTime.class), rs.getString(9)),
                 handoverId, summary.generation());
         List<RecordQueryService.RecordView> unconfirmed = records.list(actor, summary.projectId(), scopeTypes, List.of("AUTO_DRAFT"),
                 summary.scopeFrom(), summary.scopeTo(), UNCONFIRMED_LIMIT, 0, null).items();
@@ -126,15 +127,13 @@ public class HandoverQueryService {
                           long incomingOwnerId, String incomingOwnerName, LocalDate effectiveOn, int generation, long version,
                           int progressPercent, OffsetDateTime requestedAt, LocalDate scopeFrom, LocalDate scopeTo) { }
     /** 회차를 만든 뒤 철회된 관계는 패키지를 다시 만들 때까지 철회 정보와 함께 목록에 남는다. */
-    public record Conflict(long id, long version, long projectId, long fromRecordId, long toRecordId, String relationType, String note,
-                           java.time.OffsetDateTime withdrawnAt, String withdrawalReason) { }
     public record SummaryPage(List<Summary> items, long total) { }
     /**
      * revisionComment는 최신 REQUEST_REVISION 결정에 PM이 단 사유다. 저장만 하고 돌려주지 않아서 신규 담당자가 무엇을
      * 고쳐야 하는지 볼 수 없었다(FR-13).
      */
     public record Detail(Summary summary, List<String> scopeRecordTypes, boolean includeNoteDerivedRecords, int includedCount,
-                         String revisionComment, String failureReason, List<Conflict> conflicts,
+                         String revisionComment, String failureReason, List<RecordRelationService.RecordRelation> conflicts,
                          List<RecordQueryService.RecordView> unconfirmedRecords, List<String> approvalBlockers,
                          OffsetDateTime readyAt, OffsetDateTime completedAt) { }
     public static class HandoverAccessDeniedException extends RuntimeException { }
