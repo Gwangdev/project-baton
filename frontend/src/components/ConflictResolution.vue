@@ -102,7 +102,7 @@ async function resolve(item: HandoverItem, recordId: number) {
       <template v-else>
         <input
           v-model="notes[item.id]"
-          class="conflict__reason"
+          class="reason-input"
           type="text"
           maxlength="300"
           aria-label="선택 사유"
@@ -132,8 +132,4 @@ async function resolve(item: HandoverItem, recordId: number) {
 .option__meta { color: var(--grey); font-size: 11px; }
 .conflict__resolved { margin: 8px 0 0; font-size: 12px; color: var(--orange); }
 .conflict__withdrawn { margin: 8px 0 0; font-size: 12px; color: var(--grey-dark); }
-.conflict__reason {
-  margin-top: 8px; width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px;
-  font-family: var(--font); font-size: 12px;
-}
 </style>

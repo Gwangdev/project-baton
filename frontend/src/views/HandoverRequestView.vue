@@ -186,7 +186,7 @@ const nameOf = (id: number | null) => members.value?.find((m) => m.userId === id
 
       <p v-if="error" class="state state--failed">
         {{ error }}
-        <button v-if="existingHandoverId" class="link" type="button" @click="router.push(`/handovers/${existingHandoverId}/progress`)">
+        <button v-if="existingHandoverId" class="text-button" type="button" @click="router.push(`/handovers/${existingHandoverId}/progress`)">
           진행 중인 인수인계 보기
         </button>
       </p>
@@ -228,9 +228,6 @@ const nameOf = (id: number | null) => members.value?.find((m) => m.userId === id
 .check__text { color: var(--navy); line-height: 1.5; }
 .check__text em { display: block; color: var(--grey); font-style: normal; font-size: 11px; }
 
-.btn { height: 32px; padding: 0 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--white); color: var(--navy); font-family: var(--font); font-size: 13px; cursor: pointer; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn--primary { background: var(--orange); border-color: var(--orange); color: var(--white); font-weight: 600; }
 
 .aside__head { margin: 0 0 10px; font-size: 13px; color: var(--grey-dark); }
 .aside__list { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; margin: 0 0 14px; font-size: 12px; }
@@ -241,5 +238,5 @@ const nameOf = (id: number | null) => members.value?.find((m) => m.userId === id
 .aside__blockers ul { margin: 0; padding-left: 16px; }
 .aside__ready { font-size: 12px; color: var(--grey-dark); }
 .hint { margin: 0; font-size: 11px; color: var(--grey); }
-.link { border: none; background: none; padding: 0 4px; color: var(--orange); font-family: var(--font); font-size: 12px; cursor: pointer; text-decoration: underline; }
+.text-button { padding: 0 4px; }
 </style>

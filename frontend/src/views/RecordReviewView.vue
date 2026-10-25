@@ -244,7 +244,7 @@ async function reload() {
         <ul>
           <li v-for="rel in record.relations" :key="rel.id">
             <strong>{{ RELATION_LABEL[rel.relationType] }}</strong>
-            <button class="link" type="button" @click="router.push(`/records/${rel.relatedRecordId}`)">{{ rel.relatedRecordCode }}</button>
+            <button class="text-button" type="button" @click="router.push(`/records/${rel.relatedRecordId}`)">{{ rel.relatedRecordCode }}</button>
             {{ rel.relatedRecordTitle }}
             <p v-if="rel.note" class="revisions__diff">{{ rel.note }}</p>
             <RelationWithdrawal v-if="canRelate" :relation="rel" :disabled="busy" @pending="busy = $event" @done="reload" />
@@ -264,7 +264,7 @@ async function reload() {
           </select>
           <input v-model="relationNote" type="text" maxlength="300" placeholder="메모(선택)" aria-label="관계 메모" />
           <button class="btn" type="submit" :disabled="busy || relationTarget === null">등록</button>
-          <button v-if="candidateCursor" class="link" type="button" @click="loadCandidates(true)">기록 더 불러오기</button>
+          <button v-if="candidateCursor" class="text-button" type="button" @click="loadCandidates(true)">기록 더 불러오기</button>
         </form>
         <p v-if="relationError" class="state state--failed">{{ relationError }}</p>
       </section>
@@ -334,12 +334,9 @@ async function reload() {
 
 .done { margin-top: 12px; color: var(--grey-dark); font-size: 12px; }
 .actions { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
-.btn { height: 32px; padding: 0 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--white); color: var(--navy); font-family: var(--font); font-size: 13px; cursor: pointer; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn--primary { background: var(--orange); border-color: var(--orange); color: var(--white); font-weight: 600; }
 .hint { margin: 0 0 0 4px; font-size: 11px; color: var(--grey); }
 .relate { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .relate select, .relate input { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-family: var(--font); font-size: 12px; }
 .relate input { flex: 1; min-width: 160px; }
-.link { border: none; background: none; padding: 0 4px; color: var(--orange); font-family: var(--font); font-size: 12px; cursor: pointer; text-decoration: underline; }
+.text-button { padding: 0 4px; }
 </style>

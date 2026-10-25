@@ -45,16 +45,16 @@ async function withdraw() {
   <div v-if="open" class="withdraw">
     <input
       v-model="reason"
-      class="withdraw__reason"
+      class="reason-input"
       type="text"
       maxlength="300"
       aria-label="철회 사유"
       placeholder="관계가 잘못 등록된 이유"
     />
-    <button class="link" type="button" :disabled="busy || !reason.trim()" @click="withdraw">철회 확정</button>
-    <button class="link" type="button" :disabled="busy" @click="open = false">취소</button>
+    <button class="text-button" type="button" :disabled="busy || !reason.trim()" @click="withdraw">철회 확정</button>
+    <button class="text-button" type="button" :disabled="busy" @click="open = false">취소</button>
   </div>
-  <button v-else class="link" type="button" :disabled="disabled || busy || !relation" @click="open = true; reason = ''">
+  <button v-else class="text-button" type="button" :disabled="disabled || busy || !relation" @click="open = true; reason = ''">
     관계 철회
   </button>
   <p v-if="error" class="state state--failed">{{ error }}</p>
@@ -62,10 +62,5 @@ async function withdraw() {
 
 <style scoped>
 .withdraw { display: flex; gap: 8px; align-items: center; }
-.withdraw__reason {
-  margin-top: 8px; width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px;
-  font-family: var(--font); font-size: 12px;
-}
-.link { border: none; background: none; padding: 0; margin-top: 6px; color: var(--orange); font-family: var(--font); font-size: 12px; cursor: pointer; text-decoration: underline; }
-.link:disabled { color: var(--grey); cursor: default; text-decoration: none; }
+.text-button { margin-top: 6px; }
 </style>

@@ -140,9 +140,7 @@ ul { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-directi
 
 .body { margin: 0 0 8px; padding: 10px; background: var(--paper); border-radius: 6px; font-family: var(--font); font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .warn { margin: 0 0 14px; font-size: 12px; color: var(--orange); }
-.btn { height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--white); color: var(--navy); font-family: var(--font); font-size: 12px; cursor: pointer; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn--primary { background: var(--orange); border-color: var(--orange); color: var(--white); font-weight: 600; }
+.btn { height: 30px; padding: 0 12px; font-size: 12px; }
 .shared { color: var(--grey-dark); font-size: 12px; }
 .hint { color: var(--grey); font-size: 12px; }
 </style>

@@ -165,9 +165,6 @@ async function submit() {
 
 .actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
 .hint { margin: 0; font-size: 11px; color: var(--grey); }
-.btn { height: 32px; padding: 0 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--white); color: var(--navy); font-family: var(--font); font-size: 13px; cursor: pointer; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn--primary { background: var(--orange); border-color: var(--orange); color: var(--white); font-weight: 600; }
 .question__choices { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 6px; font-size: 13px; }
 .question__choice { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .question__record { font-size: 12px; color: var(--grey-dark); }

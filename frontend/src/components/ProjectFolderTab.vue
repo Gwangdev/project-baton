@@ -184,9 +184,7 @@ const PROCESSING_LABEL: Record<CollectedFile['processingStatus'], string> = {
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--grey); }
 .field input { width: 260px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-family: var(--font); font-size: 12px; }
 
-.btn { height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--white); color: var(--navy); font-family: var(--font); font-size: 12px; cursor: pointer; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn--primary { background: var(--orange); border-color: var(--orange); color: var(--white); font-weight: 600; }
+.btn { height: 30px; padding: 0 12px; font-size: 12px; }
 
 .files__head { margin: 18px 0 8px; font-size: 13px; color: var(--grey-dark); }
 .files { width: 100%; border-collapse: collapse; background: var(--white); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; font-size: 12px; }

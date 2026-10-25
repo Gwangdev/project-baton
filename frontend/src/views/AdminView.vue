@@ -425,9 +425,7 @@ const canCreateProject = computed(() => Object.values(projectForm.value).every((
 .hint { margin: 6px 0 0; font-size: 11px; color: var(--grey); }
 .create input { flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font-family: var(--font); font-size: 12px; }
 
-.btn { height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--white); color: var(--navy); font-family: var(--font); font-size: 12px; cursor: pointer; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn { height: 30px; padding: 0 12px; font-size: 12px; }
 .btn--sm { height: 26px; padding: 0 10px; font-size: 11px; }
-.btn--primary { background: var(--orange); border-color: var(--orange); color: var(--white); font-weight: 600; }
 .btn--danger { border-color: var(--danger); color: var(--danger); }
 </style>

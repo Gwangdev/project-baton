@@ -178,7 +178,7 @@ async function bulk(action: 'CONFIRM' | 'DISMISS') {
             <td>{{ r.occurredOn }}</td>
             <td><StatusBadge :status="r.trustStatus" /></td>
             <td>
-              <button class="link" type="button" @click="router.push(`/records/${r.id}`)">원문 대조</button>
+              <button class="text-button" type="button" @click="router.push(`/records/${r.id}`)">원문 대조</button>
             </td>
           </tr>
         </tbody>
@@ -194,9 +194,7 @@ async function bulk(action: 'CONFIRM' | 'DISMISS') {
 .sub { margin: 4px 0 0; font-size: 12px; color: var(--grey-dark); }
 .sub strong { color: var(--orange); }
 
-.btn { height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--white); color: var(--navy); font-family: var(--font); font-size: 12px; cursor: pointer; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn--primary { background: var(--orange); border-color: var(--orange); color: var(--white); font-weight: 600; }
+.btn { height: 30px; padding: 0 12px; font-size: 12px; }
 
 .views { display: flex; gap: 0; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
 .views__tab { border: none; background: none; padding: 8px 14px; font-family: var(--font); font-size: 13px; color: var(--grey-dark); cursor: pointer; border-bottom: 2px solid transparent; }
@@ -210,6 +208,6 @@ async function bulk(action: 'CONFIRM' | 'DISMISS') {
 .table__summary { color: var(--navy); }
 .table__code { display: inline-block; margin-right: 6px; color: var(--grey); }
 /* 발표에서 처음 여는 기록. 발표자가 목록에서 찾느라 멈추지 않게 한다. */
-.link { border: none; background: none; padding: 0; color: var(--orange); font-family: var(--font); font-size: 12px; cursor: pointer; text-decoration: underline; white-space: nowrap; }
+.text-button { white-space: nowrap; }
 .more { margin-top: 12px; }
 </style>

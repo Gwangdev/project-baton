@@ -259,7 +259,7 @@ async function ask() {
                     <span class="cite__source">{{ c.sourceName }}</span>
                     <span class="cite__date">{{ c.occurredOn }}</span>
                     <span v-if="!c.isPrimary" class="cite__tag">보조 표시</span>
-                    <button v-if="c.recordId" class="link" type="button" @click="router.push(`/records/${c.recordId}`)">원문 열람</button>
+                    <button v-if="c.recordId" class="text-button" type="button" @click="router.push(`/records/${c.recordId}`)">원문 열람</button>
                   </li>
                 </ul>
                 <dl v-if="turn.answer.answerStatus === 'NO_EVIDENCE'" class="suggest">
@@ -269,7 +269,7 @@ async function ask() {
               </div>
             </li>
           </ol>
-          <button v-if="historyCursor" class="link" type="button" @click="loadHistory(true)">이후 대화 더 보기</button>
+          <button v-if="historyCursor" class="text-button" type="button" @click="loadHistory(true)">이후 대화 더 보기</button>
 
           <div v-if="pending" class="qa__pending" aria-live="polite">
             <p class="qa__question">{{ pending.question }}</p>
@@ -306,7 +306,7 @@ async function ask() {
         <dt>담당자</dt><dd>{{ activeItem.evidence.ownerName ?? '--' }}</dd>
         <dt>기한</dt><dd>{{ activeItem.evidence.dueOn ?? '--' }}</dd>
       </dl>
-      <button class="link" type="button" @click="router.push(`/records/${activeItem.evidence.id}`)">원문 화면으로</button>
+      <button class="text-button" type="button" @click="router.push(`/records/${activeItem.evidence.id}`)">원문 화면으로</button>
     </template>
   </AppShell>
 </template>
@@ -367,9 +367,5 @@ async function ask() {
 .aside__list dt { color: var(--grey); }
 .aside__list dd { margin: 0; }
 
-.link { border: none; background: none; padding: 0; color: var(--orange); font-family: var(--font); font-size: 12px; cursor: pointer; text-decoration: underline; }
-.btn { height: 32px; padding: 0 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--white); color: var(--navy); font-family: var(--font); font-size: 13px; cursor: pointer; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn--primary { background: var(--orange); border-color: var(--orange); color: var(--white); font-weight: 600; }
 .btn--sm { height: 26px; padding: 0 10px; margin-top: 8px; font-size: 12px; }
 </style>

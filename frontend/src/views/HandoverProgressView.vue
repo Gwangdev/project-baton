@@ -154,7 +154,7 @@ const regenerate = () => command((h) => repository.regenerateHandover(h.id, h.ve
 
       <p v-if="handover.status === 'FAILED'" class="state state--failed">
         생성 실패 — {{ failure || '원인 미상' }}
-        <button class="link" type="button" :disabled="busy" @click="retry">같은 범위로 재시도</button>
+        <button class="text-button" type="button" :disabled="busy" @click="retry">같은 범위로 재시도</button>
       </p>
 
       <div class="grid">
@@ -233,8 +233,4 @@ const regenerate = () => command((h) => repository.regenerateHandover(h.id, h.ve
 
 .hint { color: var(--grey); font-size: 12px; margin: 0; }
 .hint--block { margin-top: 8px; }
-.link { border: none; background: none; color: var(--orange); font-family: var(--font); font-size: 12px; cursor: pointer; text-decoration: underline; }
-.btn { height: 32px; padding: 0 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--white); color: var(--navy); font-family: var(--font); font-size: 13px; cursor: pointer; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn--primary { background: var(--orange); border-color: var(--orange); color: var(--white); font-weight: 600; }
 </style>
