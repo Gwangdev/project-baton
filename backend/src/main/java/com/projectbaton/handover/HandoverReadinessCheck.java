@@ -4,6 +4,7 @@ import com.projectbaton.assessment.AssessmentService;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -45,26 +46,20 @@ public class HandoverReadinessCheck {
                 """, handover.id(), handover.generation(), handover.incomingOwnerId()) > 0) {
             blockers.add("REQUIRED_ITEMS_UNACKNOWLEDGED");
         }
-        if (count("""
-                select count(*) from handover_item_conflicts conflict
+        // 충돌 항목 하나는 둘 중 하나로 막는다. 해소되지 않은 유효한 관계면 선택을 기다리고, 이 회차를 만든 뒤 관계가
+        // 철회됐으면 해소할 수 없어서(회차와 그 평가는 고정되어 있다) 그 쌍을 뺀 패키지를 다시 만들어야 한다. 같은 행을
+        // 두 번 읽지 않도록 한 질의에서 둘을 함께 센다.
+        Map<String, Object> conflicts = jdbc.queryForMap("""
+                select count(*) filter (where item.resolved_by_record_id is null and relation.withdrawn_at is null) as unresolved,
+                       count(*) filter (where relation.withdrawn_at is not null) as withdrawn
+                from handover_item_conflicts conflict
                 join handover_items item on item.id=conflict.handover_item_id
                 join handover_generations generation on generation.id=conflict.generation_id
                 join record_relations relation on relation.id=conflict.relation_id
-                where item.handover_id=? and generation.generation=? and item.resolved_by_record_id is null
-                  and relation.withdrawn_at is null
-                """, handover.id(), handover.generation()) > 0) {
-            blockers.add("CONFLICTS_UNRESOLVED");
-        }
-        // 이 회차를 만든 뒤 관계가 철회된 충돌 항목은 해소할 수 없다(회차와 그 평가는 고정되어 있다). 그 쌍을 뺀
-        // 패키지를 다시 만들어야 하므로 따로 사유를 둔다.
-        if (count("""
-                select count(*) from handover_item_conflicts conflict
-                join handover_generations generation on generation.id=conflict.generation_id
-                join record_relations relation on relation.id=conflict.relation_id
-                where generation.handover_id=? and generation.generation=? and relation.withdrawn_at is not null
-                """, handover.id(), handover.generation()) > 0) {
-            blockers.add("RELATIONS_WITHDRAWN");
-        }
+                where generation.handover_id=? and generation.generation=?
+                """, handover.id(), handover.generation());
+        if (((Number) conflicts.get("unresolved")).longValue() > 0) blockers.add("CONFLICTS_UNRESOLVED");
+        if (((Number) conflicts.get("withdrawn")).longValue() > 0) blockers.add("RELATIONS_WITHDRAWN");
         if (count("""
                 select count(*) from handover_items item
                 join handover_generations generation on generation.id=item.generation_id
