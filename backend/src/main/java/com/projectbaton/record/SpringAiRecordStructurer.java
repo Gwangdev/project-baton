@@ -3,6 +3,8 @@ package com.projectbaton.record;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
+
+import com.projectbaton.ai.ModelCallLimit;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -26,17 +28,20 @@ public class SpringAiRecordStructurer implements RecordStructurer {
 
     private final ChatModel model;
     private final DraftRecordParser parser;
+    private final ModelCallLimit limit;
 
-    public SpringAiRecordStructurer(ChatModel model, DraftRecordParser parser) {
+    public SpringAiRecordStructurer(ChatModel model, DraftRecordParser parser, ModelCallLimit limit) {
         this.model = model;
         this.parser = parser;
+        this.limit = limit;
     }
 
     @Override
     public List<DraftRecord> extract(SourceDocument document) {
         String raw;
+        Prompt prompt = new Prompt(List.of(new SystemMessage(INSTRUCTIONS), new UserMessage(request(document))));
         try {
-            ChatResponse response = model.call(new Prompt(List.of(new SystemMessage(INSTRUCTIONS), new UserMessage(request(document)))));
+            ChatResponse response = limit.call(() -> model.call(prompt));
             raw = response.getResult().getOutput().getText();
         } catch (RuntimeException exception) {
             throw new StructuringException("MODEL_UNAVAILABLE", true);

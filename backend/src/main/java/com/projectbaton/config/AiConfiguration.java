@@ -1,6 +1,9 @@
 package com.projectbaton.config;
 
+import java.time.Duration;
+
 import com.projectbaton.ai.AiSettings;
+import com.projectbaton.ai.ModelCallLimit;
 import com.projectbaton.record.DraftRecordParser;
 import com.projectbaton.record.RecordStructurer;
 import com.projectbaton.record.SpringAiRecordStructurer;
@@ -38,12 +41,18 @@ public class AiConfiguration {
         return beanFactory -> AiSettings.validate(environment);
     }
 
+    /** 구조화와 임베딩의 모델 호출 시간 상한. Q&A 답변은 자기 상한({@code baton.qa.model-timeout})을 쓴다. */
+    @Bean
+    ModelCallLimit modelCallLimit(@Value("${baton.ai.call-timeout:60s}") Duration limit) {
+        return new ModelCallLimit(limit);
+    }
+
     @Bean
     RecordStructurer recordStructurer(@Value("${baton.ai.profile:stub}") String profile, DraftRecordParser parser,
-                                      ObjectMapper json, ObjectProvider<ChatModel> chatModel) {
+                                      ObjectMapper json, ObjectProvider<ChatModel> chatModel, ModelCallLimit limit) {
         return switch (profile) {
             case "stub" -> new StubRecordStructurer(parser, json);
-            case "local", "provider" -> new SpringAiRecordStructurer(required(chatModel, profile, "ChatModel"), parser);
+            case "local", "provider" -> new SpringAiRecordStructurer(required(chatModel, profile, "ChatModel"), parser, limit);
             default -> throw new IllegalStateException("Unknown baton.ai.profile: " + profile);
         };
     }
@@ -51,10 +60,10 @@ public class AiConfiguration {
     @Bean
     EmbeddingClient embeddingClient(@Value("${baton.ai.profile:stub}") String profile,
                                     @Value("${baton.ai.embedding-model-id:}") String modelId,
-                                    ObjectProvider<EmbeddingModel> embeddingModel) {
+                                    ObjectProvider<EmbeddingModel> embeddingModel, ModelCallLimit limit) {
         return switch (profile) {
             case "stub" -> new StubEmbeddingClient();
-            case "local", "provider" -> new SpringAiEmbeddingClient(required(embeddingModel, profile, "EmbeddingModel"), modelId);
+            case "local", "provider" -> new SpringAiEmbeddingClient(required(embeddingModel, profile, "EmbeddingModel"), modelId, limit);
             default -> throw new IllegalStateException("Unknown baton.ai.profile: " + profile);
         };
     }

@@ -2,6 +2,7 @@ package com.projectbaton.qa;
 
 import java.util.ArrayList;
 import java.util.List;
+import com.projectbaton.ai.ModelCallLimit;
 import org.springframework.ai.embedding.EmbeddingModel;
 
 /**
@@ -16,13 +17,15 @@ import org.springframework.ai.embedding.EmbeddingModel;
 public class SpringAiEmbeddingClient implements EmbeddingClient {
     private final EmbeddingModel model;
     private final String modelId;
+    private final ModelCallLimit limit;
 
-    public SpringAiEmbeddingClient(EmbeddingModel model, String modelId) {
+    public SpringAiEmbeddingClient(EmbeddingModel model, String modelId, ModelCallLimit limit) {
         if (modelId == null || modelId.isBlank() || modelId.length() > 120) {
             throw new IllegalStateException("baton.ai.embedding-model-id must name the pinned embedding model (1..120 chars)");
         }
         this.model = model;
         this.modelId = modelId;
+        this.limit = limit;
     }
 
     @Override
@@ -34,7 +37,7 @@ public class SpringAiEmbeddingClient implements EmbeddingClient {
     public List<float[]> embed(List<String> texts) {
         List<float[]> raw;
         try {
-            raw = model.embed(texts);
+            raw = limit.call(() -> model.embed(texts));
         } catch (RuntimeException exception) {
             throw new EmbeddingUnavailableException(exception);
         }

@@ -8,7 +8,7 @@ spring:
       - org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
       # 이 자동 구성은 어떤 공급자를 고르든 Google 임베딩 연결을 만들고 그 연결은 키 없이는 만들어지지 않는데,
       # Compose가 설정하지 않은 GOOGLE_API_KEY를 빈 문자열로 넘겨서 스택이 뜨지 못했다. Google이 임베딩 공급자일 때만
-      # config/GoogleEmbeddingConnectionConfiguration이 다시 넣는다.
+      # config/GoogleGenAiConnectionConfiguration이 연결을 만든다.
       - org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration
   datasource:
     url: ${BATON_DB_URL}
@@ -26,8 +26,16 @@ spring:
     # BATON_AI_EMBEDDING_MODEL_ID로 고정하고, 이 값이 공급자에게 보내는 모델 이름이기도 하다.
     model:
       chat: ${BATON_AI_CHAT_PROVIDER:${BATON_AI_PROVIDER:none}}
+    # 설계(docs/backend-design/README.md §6)는 SDK 재시도를 한 번으로 고정하고 작업 계층만 재시도한다. Spring AI의
+    # 재시도(기본 10회, 2초부터 5배씩)와 OpenAI SDK의 재시도(기본 3회)가 켜져 있으면 거절하는 공급자에게 여러 번 묻고
+    # 그동안 작업 slot을 쥔다. Google SDK의 재시도는 config/GoogleGenAiConnectionConfiguration이 끈다. 이 속성은 이름과
+    # 달리 첫 시도 뒤의 재시도 횟수로 쓰여서(RetryPolicy.maxRetries) 0이 한 번만 묻는다는 뜻이다.
+    retry:
+      max-attempts: 0
     openai:
       api-key: ${OPENAI_API_KEY:}
+      max-retries: 0
+      timeout: ${baton.ai.call-timeout:60s}
       chat:
         options:
           model: ${BATON_AI_CHAT_MODEL_ID:}
@@ -41,7 +49,7 @@ spring:
           options:
             model: ${BATON_AI_CHAT_MODEL_ID:}
         embedding:
-          # Google이 임베딩 공급자일 때만 읽는다(config/GoogleEmbeddingConnectionConfiguration). GOOGLE_API_KEY 없이
+          # Google이 임베딩 공급자일 때만 읽는다(config/GoogleGenAiConnectionConfiguration). GOOGLE_API_KEY 없이
           # Google을 고른 배포는 AiSettings가 멈춘다.
           api-key: ${GOOGLE_API_KEY:}
           text:
@@ -136,6 +144,12 @@ baton:
     # 외부 공급자(openai, google-genai, 기본 URL이 배포 네트워크 밖인 Ollama)는 데이터를 밖으로 보낸다는 명시적 결정인
     # "approved"가 있어야 기동한다.
     external-transmission: ${BATON_AI_EXTERNAL_TRANSMISSION:}
+    # 구조화와 임베딩의 모델 호출 하나에 거는 시간 상한(ai/ModelCallLimit). 넘으면 호출을 끊고 작업 계층이 재시도를
+    # 정한다. Q&A 답변은 baton.qa.model-timeout(기본 20초)을 쓴다.
+    call-timeout: ${BATON_AI_CALL_TIMEOUT:60s}
+    # Google 공급자 주소. 비우면 SDK 기본 주소이고, 시험이 이 기계의 가짜 서버로 돌릴 때 쓴다. OpenAI와 Ollama는
+    # spring.ai.openai.base-url과 spring.ai.ollama.base-url이 같은 일을 한다.
+    google-base-url: ${BATON_AI_GOOGLE_BASE_URL:}
 
 # 요청의 trace id(RequestTraceFilter)를 요청이 도는 동안 쓰는 모든 로그 줄에, tracing을 켰을 때 Boot가 trace id를 넣는
 # 자리와 같은 곳에 넣어서 로그 줄, 오류 응답, 감사 행을 서로 따라갈 수 있다.

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -24,6 +25,8 @@ import org.springframework.ai.embedding.EmbeddingResponse;
  * 아무것도 묻지 않아서 서비스가 키나 네트워크 없이 뜬다.
  */
 class SpringAiEmbeddingClientTest {
+    private static final ModelCallLimit LIMIT = new ModelCallLimit(Duration.ofSeconds(10));
+
     private static final class Fake implements EmbeddingModel {
         final AtomicInteger calls = new AtomicInteger();
         final int size;
@@ -55,14 +58,14 @@ class SpringAiEmbeddingClientTest {
     void buildingTheClientDoesNotCallTheModel() {
         Fake model = new Fake(768, false);
 
-        new SpringAiEmbeddingClient(model, "embed-x");
+        new SpringAiEmbeddingClient(model, "embed-x", LIMIT);
 
         assertEquals(0, model.calls.get());
     }
 
     @Test
     void aLongerVectorIsCutToTheColumnWidthAndRescaled() {
-        EmbeddingClient client = new SpringAiEmbeddingClient(new Fake(768, false), "embed-x");
+        EmbeddingClient client = new SpringAiEmbeddingClient(new Fake(768, false), "embed-x", LIMIT);
 
         float[] vector = client.embed(List.of("text")).getFirst();
 
@@ -78,19 +81,19 @@ class SpringAiEmbeddingClientTest {
         float[] expected = new float[256];
         for (int d = 0; d < 256; d++) expected[d] = d + 1;
 
-        assertArrayEquals(expected, new SpringAiEmbeddingClient(new Fake(256, false), "embed-x").embed(List.of("text")).getFirst());
+        assertArrayEquals(expected, new SpringAiEmbeddingClient(new Fake(256, false), "embed-x", LIMIT).embed(List.of("text")).getFirst());
     }
 
     @Test
     void aVectorShorterThanTheColumnIsRefused() {
-        EmbeddingClient client = new SpringAiEmbeddingClient(new Fake(128, false), "embed-x");
+        EmbeddingClient client = new SpringAiEmbeddingClient(new Fake(128, false), "embed-x", LIMIT);
 
         assertThrows(EmbeddingClient.EmbeddingUnavailableException.class, () -> client.embed(List.of("text")));
     }
 
     @Test
     void aProviderFailureIsReportedAsUnavailable() {
-        EmbeddingClient client = new SpringAiEmbeddingClient(new Fake(768, true), "embed-x");
+        EmbeddingClient client = new SpringAiEmbeddingClient(new Fake(768, true), "embed-x", LIMIT);
 
         assertThrows(EmbeddingClient.EmbeddingUnavailableException.class, () -> client.embed(List.of("text")));
     }

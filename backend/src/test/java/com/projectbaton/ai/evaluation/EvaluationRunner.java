@@ -1,5 +1,6 @@
 package com.projectbaton.ai.evaluation;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -8,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.projectbaton.ai.ModelCallLimit;
 import com.projectbaton.qa.EmbeddingClient;
 import com.projectbaton.qa.GroundedAnswerGenerator;
 import com.projectbaton.qa.SpringAiAnswerGenerator;
@@ -26,6 +28,9 @@ import tools.jackson.databind.ObjectMapper;
  */
 public final class EvaluationRunner {
     private static final int EMBEDDING_BATCH = 16;
+    // 평가는 로컬 모델(작은 Mac에서 한 문서에 몇십 초)까지 재므로 앱의 기본 상한(60초)보다 넉넉히 두되, 공급자가 멈추면
+    // 평가가 몇 시간 붙잡히지 않게 상한은 둔다.
+    private static final ModelCallLimit LIMIT = new ModelCallLimit(Duration.ofMinutes(5));
 
     private final MeteredModels.MeteredChat chat;
     private final EmbeddingModel embedding;
@@ -88,7 +93,7 @@ public final class EvaluationRunner {
         }
 
         void structuring() {
-            RecordStructurer structurer = new SpringAiRecordStructurer(chat, parser);
+            RecordStructurer structurer = new SpringAiRecordStructurer(chat, parser, LIMIT);
             List<RecordStructurer.Member> members = set.members().stream().map(m -> new RecordStructurer.Member(m.userId(), m.name())).toList();
             for (EvaluationSet.Document document : set.documents()) {
                 long started = System.nanoTime();
@@ -191,7 +196,7 @@ public final class EvaluationRunner {
         }
 
         void retrieval() {
-            EmbeddingClient client = new SpringAiEmbeddingClient(embedding, embeddingModelId);
+            EmbeddingClient client = new SpringAiEmbeddingClient(embedding, embeddingModelId, LIMIT);
             List<EvaluationSet.GoldRecord> corpus = set.records().stream().filter(r -> !Boolean.TRUE.equals(r.conflictClone())).toList();
             List<float[]> vectors = embedAll(client, corpus.stream().map(r -> r.title() + "\n" + r.summary()).toList());
             List<EvaluationSet.Question> asked = set.questions().stream().filter(q -> q.goldRecord() != null && "ANSWERABLE".equals(q.kind())).toList();
